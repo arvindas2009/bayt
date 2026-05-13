@@ -1,0 +1,94 @@
+# Bayt: The Family Operating System - Exhaustive Codebase Analysis
+
+## 1. App Description & Vision
+
+**Bayt** (Arabic for "home") is conceived not as a traditional app, but as a "family operating system." It operates on the thesis that a family is an interconnected system of three core problems:
+1.  **Operations**: The logistical burden (meal planning, scheduling, school admin) that causes mental fatigue.
+2.  **Health**: The challenge of cross-generational care and noticing patterns across the family unit rather than just individual symptoms.
+3.  **Connection**: The subtle erosion of relationships and memories under the pressure of daily operations.
+
+**The Solution:** Bayt sits underneath these problems, ingesting passive data (calendars, health portals, chat logs) without requiring the family to change their behavior or install new apps. It uses a multi-agent AI architecture to process this data and outputs a single, dense, 30-second daily "Family Briefing" that highlights actionable intelligence.
+
+## 2. Multi-Agent Architecture
+
+The intelligence layer is driven by four distinct agents (two implemented, two mocked for the demo). These are orchestrated centrally to synthesize insights.
+
+*   **Operations Agent (Implemented in `lib/agents/operations-agent.ts`)**:
+    *   **Role**: Handles high-complexity logistical tasks.
+    *   **Logic**: It ingests family health profiles (dietary needs, preferences) and recent calendar events. It uses Gemini to generate a `weeklyPlan` (meals tagged with nutrition and suitability), `calendarConflicts` (detecting overlaps and suggesting resolutions), and `schoolDrafts` (drafting emails for admin tasks).
+    *   **Technical Detail**: Uses `safeGenerateObject` with a strict Zod schema (`OperationsSchema`) to ensure structured JSON output. It calculates a `timeSavedHours` metric.
+
+*   **Health Agent (Implemented in `lib/agents/health-agent.ts`)**:
+    *   **Role**: Moves beyond individual health tracking to cross-generational pattern detection.
+    *   **Logic**: Analyzes all family members' health profiles simultaneously. It looks for correlations (e.g., "Grandmother's low energy + child's sleeplessness = potential environmental issue"). Outputs `familyPatterns` (severity, affected members, recommendations), `memberSummaries`, and `crossLinks`.
+
+*   **Connection Agent (Mocked in `lib/agents/orchestrator.ts`)**:
+    *   **Role**: Combats relational drift and captures memories.
+    *   **Logic**: (Faked for prototype) Intended to parse chat logs/calendars to notice who hasn't spoken, suggesting "micro-interventions" (e.g., "Schedule a 20-minute drive with Layla"). It also surfaces "memories" (e.g., quotes from grandparents).
+
+*   **Caregiver Agent (Mocked in `lib/agents/orchestrator.ts`)**:
+    *   **Role**: Protects the primary caretaker from burnout.
+    *   **Logic**: (Faked for prototype) Calculates a `loadDistribution` percentage across the family, identifies an `atRiskMember`, and suggests interventions to redistribute the load.
+
+## 3. Core Functionalities & Data Flow
+
+1.  **Data Ingestion (The Database)**: The Prisma schema (`prisma/schema.prisma`) defines the entities: `Family`, `FamilyMember`, `HealthProfile`, `Medication`, `CalendarEvent`, and `MealPlan`. In the demo, this is populated by `lib/data/seed.ts` with the fictional Al-Salem family.
+2.  **Orchestration (`lib/agents/orchestrator.ts`)**: This is the brain. When a briefing is requested, the orchestrator:
+    *   Fetches the full family graph.
+    *   Runs the `Operations` and `Health` agents **in parallel** via `Promise.all`.
+    *   Takes the outputs (plus the mocked Connection/Caregiver data) and constructs a massive prompt.
+    *   Calls Gemini again to synthesize a calm, scannable `BriefingData` object (summary, insights, alerts).
+    *   Persists this to the `Briefing` table in SQLite.
+3.  **UI Data Flow**:
+    *   A client-side `FamilyHydrator` component fetches initial data and populates Zustand stores (`store/family-store.ts`, `store/agent-store.ts`).
+    *   Server and Client components read from these stores or directly from the DB via Prisma to render the dashboard.
+
+## 4. Exhaustive File/Component Analysis
+
+### `app/` (Next.js Routing Layer)
+*   **`page.tsx`**: The landing/login page.
+*   **`onboarding/page.tsx`**: A flow for setting up the family profile.
+*   **`(dashboard)/layout.tsx`**: The shell. Contains the `Sidebar`, `TopBar`, and crucially, the `FamilyHydrator` which initializes client state.
+*   **`(dashboard)/briefing/page.tsx`**: The hero view. Displays the synthesized daily summary. Uses `ActiveAlerts`, `DailyBriefing`, and `TimeDividend` components.
+*   **`(dashboard)/operations/page.tsx` & `meal-plan/page.tsx`**: Shows logistics. The meal plan subpage relies on `components/operations/MealPlanGrid.tsx`.
+*   **`(dashboard)/health/page.tsx` & `[memberId]/page.tsx`**: Shows the cross-generational health graph and individual drill-downs. Uses the complex `FamilyHealthMap.tsx`.
+*   **`api/family/*`**: REST endpoints for CRUD operations on family members and events.
+*   **`api/briefing/generate/route.ts`**: The crucial endpoint that triggers `runOrchestrator(familyId)`.
+*   **`api/agents/[agent]/route.ts`**: Endpoints to manually trigger specific agents for live UI updates.
+
+### `components/` (UI Layer - Tailwind & Framer Motion)
+*   **`health/FamilyHealthMap.tsx`**: A sophisticated visualization component using **D3.js** to draw a force-directed graph connecting family members based on shared health risks or genetic links (data from the Health Agent).
+*   **`health/HealthTimeline.tsx` & `PatternAlertsRow.tsx`**: Renders the AI-detected health patterns.
+*   **`operations/MealPlanGrid.tsx`**: Displays the AI-generated meals, explicitly showing how dietary constraints (e.g., low sodium for a grandparent, high protein for a teen) were met.
+*   **`operations/FamilyAgenda.tsx` & `CalendarConflicts.tsx`**: Shows the schedule and highlights the overlaps detected by the Operations agent.
+*   **`briefing/DailyBriefing.tsx` & `ActiveAlerts.tsx`**: The core components of the 30-second morning view, rendering the synthesized `insights` and `alerts`.
+*   **`briefing/TimeDividend.tsx`**: Renders a chart showing `timeSavedHours`, a key metric for the hackathon pitch.
+*   **`connection/MemoryVault.tsx` & `MicroInterventionsTimeline.tsx`**: UI stubs for the mocked Connection agent data.
+*   **`layout/AgentStatusDot.tsx`**: A UI detail that flashes when agents are "thinking" (running in the background).
+
+### `lib/` (Core Logic)
+*   **`ai/safe-generate.ts`**: A critical wrapper around the Vercel AI SDK. It adds timeouts and a fallback to `nemotronNano` (NVIDIA model) if the primary `geminiFlash` model fails or rate-limits, ensuring stability during a live hackathon demo.
+*   **`agents/orchestrator.ts`**: (Described above).
+*   **`agents/operations-agent.ts` & `health-agent.ts`**: Contain the complex system prompts and Zod schemas that define the AI's reasoning capabilities.
+*   **`db/prisma.ts` & `queries.ts`**: Database singleton and helper functions (e.g., `getFamilyWithEverything`) for complex joins.
+*   **`demo/mode.ts`**: A toggle (`NEXT_PUBLIC_DEMO_MODE`) to bypass live AI/DB calls and serve hardcoded data for reliable demonstrations.
+
+### `store/` (State Management)
+*   **`agent-store.ts`**: Zustand store managing the execution state (`idle`, `running`, `success`) and output of individual agents.
+*   **`family-store.ts`**: Holds the current family graph on the client to avoid redundant API calls.
+*   **`briefing-store.ts`**: Manages the state of the synthesized daily briefing.
+
+### `types/` (TypeScript Definitions)
+*   **`agents.ts`**: Defines the rigorous interfaces for AI outputs (e.g., `OperationsOutput`, `HealthOutput`, `BriefingData`).
+*   **`family.ts` & `meals.ts`**: Domain models mapping to Prisma schema types.
+
+## 5. Alignment with Thesis (Hackathon Criteria)
+
+Bayt directly addresses the four hackathon criteria through its architecture and UI:
+
+1.  **Relationships**: The **Connection Agent** (surfaced in the UI via `MicroInterventionsTimeline` and `MemoryVault`) detects drift and suggests actions before conflict arises, while preserving generational memories.
+2.  **Time Saved**: The **Operations Agent** takes over high-cognitive-load tasks like meal planning across complex dietary needs and resolving schedule conflicts. This is quantified.
+3.  **Time Given Back**: Visualized explicitly in the `TimeDividend` component on the Briefing page, showing hours returned to the family per week due to the system's automation.
+4.  **Health**: Addressed by the **Health Agent**. It moves beyond standard tracking by finding *patterns* across the family unit, visualized powerfully in the D3-based `FamilyHealthMap`, catching issues individual doctors might miss in isolation.
+
+The decision to make the app a passive "system" rather than a chat app ensures it solves the friction problem—the family just reads the 30-second briefing, and Bayt does the rest.

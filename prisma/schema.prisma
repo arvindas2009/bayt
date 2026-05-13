@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Family {
+  id        String   @id @default(cuid())
+  name      String
+  members   FamilyMember[]
+  briefings Briefing[]
+  mealPlans MealPlan[]
+  createdAt DateTime @default(now())
+}
+
+model FamilyMember {
+  id              String   @id @default(cuid())
+  familyId        String
+  family          Family   @relation(fields: [familyId], references: [id])
+  name            String
+  role            String   // parent | child | grandparent
+  age             Int
+  avatarSeed      String
+  dietaryNeeds    String   // JSON array as string
+  preferences     String?  // JSON: { foodLikes, foodDislikes, notes }
+  healthProfile   HealthProfile?
+  medications     Medication[]
+  calendarEvents  CalendarEvent[]
+}
+
+model HealthProfile {
+  id              String       @id @default(cuid())
+  memberId        String       @unique
+  member          FamilyMember @relation(fields: [memberId], references: [id])
+  conditions      String       // JSON
+  lastLabResults  String       // JSON
+  wearableData    String       // JSON
+  riskFlags       String       // JSON
+}
+
+model Medication {
+  id           String       @id @default(cuid())
+  memberId     String
+  member       FamilyMember @relation(fields: [memberId], references: [id])
+  name         String
+  dosage       String
+  frequency    String
+  interactions String       // JSON
+}
+
+model CalendarEvent {
+  id        String       @id @default(cuid())
+  memberId  String
+  member    FamilyMember @relation(fields: [memberId], references: [id])
+  title     String
+  date      DateTime
+  category  String
+  conflict  Boolean      @default(false)
+  metadata  String?      // JSON
+}
+
+model MealPlan {
+  id       String   @id @default(cuid())
+  familyId String
+  family   Family   @relation(fields: [familyId], references: [id])
+  weekOf   DateTime
+  meals    Meal[]
+}
+
+model Meal {
+  id            String   @id @default(cuid())
+  planId        String
+  plan          MealPlan @relation(fields: [planId], references: [id])
+  day           String
+  type          String   // breakfast | lunch | dinner
+  name          String
+  tags          String   // JSON
+  nutritionJson String   // JSON
+}
+
+model Briefing {
+  id           String   @id @default(cuid())
+  familyId     String
+  family       Family   @relation(fields: [familyId], references: [id])
+  date         DateTime @default(now())
+  summary      String
+  opsOutput    String   // JSON
+  healthOutput String   // JSON
+  timeSaved    Float
+  alerts       String   // JSON
+}

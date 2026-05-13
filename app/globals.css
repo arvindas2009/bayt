@@ -1,26 +1,152 @@
 @import "tailwindcss";
 
+/* ─── MD3 Dark Surface palette (from Stitch design system) ─────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces */
+  --bg:                       #141218;
+  --surface:                  #141218;
+  --surface-dim:              #141218;
+  --surface-container-lowest: #0f0d13;
+  --surface-container-low:    #1d1b20;
+  --surface-container:        #211f24;
+  --surface-container-high:   #2b292f;
+  --surface-container-highest:#36343a;
+  --surface-bright:           #3b383e;
+  --surface-variant:          #36343a;
+
+  /* Primary */
+  --primary:                  #cfbcff;
+  --on-primary:               #381e72;
+  --primary-container:        #6750a4;
+  --on-primary-container:     #e0d2ff;
+  --primary-fixed:            #e9ddff;
+  --primary-fixed-dim:        #cfbcff;
+  --inverse-primary:          #6750a4;
+
+  /* Secondary */
+  --secondary:                #cdc0e9;
+  --on-secondary:             #342b4b;
+  --secondary-container:      #4d4465;
+  --on-secondary-container:   #bfb2da;
+  --secondary-fixed:          #e9ddff;
+  --secondary-fixed-dim:      #cdc0e9;
+
+  /* Tertiary (gold/amber) */
+  --tertiary:                 #e7c365;
+  --on-tertiary:              #3e2e00;
+  --tertiary-container:       #c9a74d;
+  --on-tertiary-container:    #503d00;
+  --tertiary-fixed:           #ffdf93;
+  --tertiary-fixed-dim:       #e7c365;
+
+  /* Error */
+  --error:                    #ffb4ab;
+  --on-error:                 #690005;
+  --error-container:          #93000a;
+  --on-error-container:       #ffdad6;
+
+  /* Backgrounds / text */
+  --background:               #141218;
+  --on-background:            #e6e0e9;
+  --on-surface:               #e6e0e9;
+  --on-surface-variant:       #cbc4d2;
+  --inverse-surface:          #e6e0e9;
+  --inverse-on-surface:       #322f35;
+
+  /* Outline */
+  --outline:                  #948e9c;
+  --outline-variant:          #494551;
+
+  /* Surface tint */
+  --surface-tint:             #cfbcff;
+
+  /* Semantic aliases used by other components */
+  --surface-2:                var(--surface-container);
+  --border:                   var(--outline-variant);
+  --text-primary:             var(--on-background);
+  --text-muted:               var(--on-surface-variant);
+  --accent:                   var(--primary);
+  --accent-health:            #86efac;
+  --accent-alert:             var(--error);
+  --accent-connection:        var(--tertiary);
 }
 
+/* ─── shadcn/ui variable mapping ────────────────────────────────────────────── */
+:root {
+  --shadcn-background:         var(--bg);
+  --shadcn-foreground:         var(--on-background);
+  --shadcn-card:               var(--surface-container-low);
+  --shadcn-card-foreground:    var(--on-surface);
+  --shadcn-popover:            var(--surface-container);
+  --shadcn-popover-foreground: var(--on-surface);
+  --shadcn-primary:            var(--primary);
+  --shadcn-primary-foreground: var(--on-primary);
+  --shadcn-secondary:          var(--surface-container-high);
+  --shadcn-secondary-foreground: var(--on-surface);
+  --shadcn-muted:              var(--surface-container);
+  --shadcn-muted-foreground:   var(--on-surface-variant);
+  --shadcn-accent:             var(--primary-container);
+  --shadcn-accent-foreground:  var(--on-primary-container);
+  --shadcn-destructive:        var(--error);
+  --shadcn-destructive-foreground: var(--on-error);
+  --shadcn-border:             var(--outline-variant);
+  --shadcn-input:              var(--surface-container);
+  --shadcn-ring:               var(--primary);
+  --radius:                    0.25rem;
+}
+
+/* ─── Tailwind v4 theme tokens ──────────────────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Background / text colours for bg-background, text-foreground, etc. */
+  --color-background:                  var(--background);
+  --color-foreground:                  var(--on-background);
+
+  /* Full MD3 palette — each generates bg-*, text-*, border-* utilities */
+  --color-primary:                     var(--primary);
+  --color-on-primary:                  var(--on-primary);
+  --color-primary-container:           var(--primary-container);
+  --color-on-primary-container:        var(--on-primary-container);
+  --color-secondary:                   var(--secondary);
+  --color-on-secondary:                var(--on-secondary);
+  --color-secondary-container:         var(--secondary-container);
+  --color-on-secondary-container:      var(--on-secondary-container);
+  --color-tertiary:                    var(--tertiary);
+  --color-on-tertiary:                 var(--on-tertiary);
+  --color-tertiary-container:          var(--tertiary-container);
+  --color-error:                       var(--error);
+  --color-on-error:                    var(--on-error);
+  --color-error-container:             var(--error-container);
+  --color-surface:                     var(--surface);
+  --color-surface-dim:                 var(--surface-dim);
+  --color-surface-bright:              var(--surface-bright);
+  --color-surface-container-lowest:    var(--surface-container-lowest);
+  --color-surface-container-low:       var(--surface-container-low);
+  --color-surface-container:           var(--surface-container);
+  --color-surface-container-high:      var(--surface-container-high);
+  --color-surface-container-highest:   var(--surface-container-highest);
+  --color-surface-variant:             var(--surface-variant);
+  --color-on-surface:                  var(--on-surface);
+  --color-on-surface-variant:          var(--on-surface-variant);
+  --color-outline:                     var(--outline);
+  --color-outline-variant:             var(--outline-variant);
+  --color-inverse-surface:             var(--inverse-surface);
+  --color-inverse-on-surface:          var(--inverse-on-surface);
+  --color-inverse-primary:             var(--inverse-primary);
+
+  /* Font families */
+  --font-sans:       var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display:    var(--font-space-grotesk), ui-sans-serif, sans-serif;
+  --font-mono:       var(--font-jetbrains-mono), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ─── Base styles ────────────────────────────────────────────────────────────── */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--on-background);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--primary);
+  color: var(--on-primary);
 }
