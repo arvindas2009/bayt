@@ -1,6 +1,10 @@
 [build]
-  command = "npm run build"
+  command = "npx prisma db push --accept-data-loss && npm run seed && npm run build"
   publish = ".next"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["dev.db", "prisma/**"]
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"

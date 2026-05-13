@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { Settings, HeartPulse, Users, ArrowRight } from 'lucide-react';
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { Settings, HeartPulse, Users, ArrowRight } from "lucide-react";
 
 // ─── Animation ────────────────────────────────────────────────────────────────
 
@@ -19,51 +19,51 @@ const fadeUp = {
 
 const pillars = [
   {
-    code: 'MOD_OPR',
-    label: 'Operations',
+    code: "MOD_OPR",
+    label: "Operations",
     icon: Settings,
     description:
-      'Logistical orchestration. Shared calendars, task delegation protocols, and inventory management routed through a centralized ledger.',
-    dataLoad: 'High',
+      "Logistical orchestration. Shared calendars, task delegation protocols, and inventory management routed through a centralized ledger.",
+    dataLoad: "High",
   },
   {
-    code: 'MOD_HLT',
-    label: 'Health',
+    code: "MOD_HLT",
+    label: "Health",
     icon: HeartPulse,
     description:
-      'Biometric and wellness tracking. Medical records, appointment scheduling, and dietary requirement matrices held in secure permanence.',
-    dataLoad: 'Moderate',
+      "Biometric and wellness tracking. Medical records, appointment scheduling, and dietary requirement matrices held in secure permanence.",
+    dataLoad: "Moderate",
   },
   {
-    code: 'MOD_CON',
-    label: 'Connection',
+    code: "MOD_CON",
+    label: "Connection",
     icon: Users,
     description:
-      'Relational architecture. Milestone tracking, communication relays, and collective memory archives structured for minimal friction.',
-    dataLoad: 'Dynamic',
+      "Relational architecture. Milestone tracking, communication relays, and collective memory archives structured for minimal friction.",
+    dataLoad: "Dynamic",
   },
 ];
 
 const steps = [
   {
-    n: '01',
-    title: 'Connect what your family already uses',
-    body: 'Calendars, wearables, medical records, school portals — the system reads the signals you already generate.',
+    n: "01",
+    title: "Powered by Llama 3 via NVIDIA NIM",
+    body: "The core intelligence engine uses Llama 3 and structured LLMs, accelerated by NVIDIA NIM APIs for fast and secure reasoning.",
   },
   {
-    n: '02',
-    title: 'Four AI agents work in the background',
-    body: 'Operations, Health, Connection, and Caregiver agents run continuously, cross-referencing every data source.',
+    n: "02",
+    title: "Data Persisted via Prisma & SQLite",
+    body: "Family states, health markers, and operational logs are reliably stored in a local SQLite database managed through Prisma ORM.",
   },
   {
-    n: '03',
-    title: 'One daily briefing surfaces what matters',
-    body: 'Every morning: a prioritized summary of risks, conflicts, and actions — nothing buried, nothing missed.',
+    n: "03",
+    title: "Four Specialized AI Agents",
+    body: "Distinct Health, Operations, Connection, and Caregiver agents autonomously process their specific domains to resolve conflicts and flag risks.",
   },
   {
-    n: '04',
-    title: 'Hours come back to your week',
-    body: 'The invisible coordination work that lived in your head moves to the system. You get that time back.',
+    n: "04",
+    title: "Central Orchestrator & Dashboard",
+    body: "A master orchestrator agent synthesizes insights from all modules into a single prioritized daily briefing on your dynamic dashboard.",
   },
 ];
 
@@ -72,18 +72,17 @@ const steps = [
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--on-background)]">
-
       {/* ── Nav ─────────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 w-full border-b border-[var(--outline-variant)] bg-[var(--surface)]">
         <div className="mx-auto flex max-w-[1440px] items-center justify-between px-10 py-2">
           <span
             className="text-2xl font-bold uppercase tracking-tighter text-[var(--primary)]"
-            style={{ fontFamily: 'var(--font-space-grotesk)' }}
+            style={{ fontFamily: "var(--font-space-grotesk)" }}
           >
             BAYT
           </span>
           <nav className="hidden items-center gap-8 md:flex">
-            {['Operations', 'Health', 'Connection'].map((item) => (
+            {["Operations", "Health", "Connection"].map((item) => (
               <span
                 key={item}
                 className="cursor-default font-mono text-xs uppercase tracking-widest text-[var(--on-surface-variant)] transition-colors hover:text-[var(--primary)]"
@@ -102,11 +101,9 @@ export default function LandingPage() {
       </header>
 
       <main>
-
         {/* ── Hero ────────────────────────────────────────────────────────────── */}
         <section className="mx-auto max-w-[1440px] border-b border-[var(--outline-variant)] px-10 pb-24 pt-32">
           <div className="max-w-5xl">
-
             <div className="mb-12 border-l-2 border-[var(--primary)] pl-6">
               <motion.h1
                 custom={0}
@@ -115,8 +112,8 @@ export default function LandingPage() {
                 animate="visible"
                 className="mb-4 font-bold uppercase leading-none tracking-tighter text-[var(--on-background)]"
                 style={{
-                  fontFamily: 'var(--font-space-grotesk)',
-                  fontSize: 'clamp(36px, 5.5vw, 72px)',
+                  fontFamily: "var(--font-space-grotesk)",
+                  fontSize: "clamp(36px, 5.5vw, 72px)",
                 }}
               >
                 Your family runs on invisible work.
@@ -128,8 +125,8 @@ export default function LandingPage() {
                 animate="visible"
                 className="font-bold uppercase leading-none tracking-tighter text-[var(--primary)]"
                 style={{
-                  fontFamily: 'var(--font-space-grotesk)',
-                  fontSize: 'clamp(36px, 5.5vw, 72px)',
+                  fontFamily: "var(--font-space-grotesk)",
+                  fontSize: "clamp(36px, 5.5vw, 72px)",
                 }}
               >
                 Bayt makes it visible.
@@ -146,12 +143,19 @@ export default function LandingPage() {
               >
                 AI infrastructure for the modern family.
                 <br />
-                <span className="text-[var(--primary)]">Sys.Manifest:</span>{' '}
+                <span className="text-[var(--primary)]">
+                  Sys.Manifest:
+                </span>{" "}
                 Operations. Health. Connection.
                 <br />
                 Status: Active.
               </motion.p>
-              <motion.div custom={3} variants={fadeUp} initial="hidden" animate="visible">
+              <motion.div
+                custom={3}
+                variants={fadeUp}
+                initial="hidden"
+                animate="visible"
+              >
                 <Link
                   href="/briefing"
                   className="flex items-center gap-3 border border-[var(--primary)] bg-[var(--primary)] px-8 py-4 font-mono text-xs uppercase tracking-widest text-[var(--on-primary)] transition-opacity hover:opacity-80"
@@ -161,7 +165,43 @@ export default function LandingPage() {
                 </Link>
               </motion.div>
             </div>
+          </div>
+        </section>
 
+        {/* ── Team ────────────────────────────────────────────────────────────── */}
+        <section className="mx-auto max-w-[1440px] border-b border-[var(--outline-variant)] px-10 py-10">
+          <div className="mb-6 flex items-end justify-between">
+            <h2
+              className="text-2xl font-medium uppercase tracking-tight text-[var(--on-background)]"
+              style={{ fontFamily: "var(--font-space-grotesk)" }}
+            >
+              The Team
+            </h2>
+            <Link
+              href="https://github.com/arvindas2009/bayt"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-xs uppercase tracking-widest text-[var(--primary)] hover:underline"
+            >
+              GitHub Repository
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+            {[
+              "Arvin Das",
+              "Muhammed Riswan Navas",
+              "Fathima Niya",
+              "Mohamed Rehan Khan",
+            ].map((name) => (
+              <div
+                key={name}
+                className="border border-[var(--outline-variant)] bg-[var(--surface)] p-6 transition-colors hover:bg-[var(--surface-container)]"
+              >
+                <span className="font-mono text-xs uppercase tracking-widest text-[var(--on-background)]">
+                  {name}
+                </span>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -170,7 +210,7 @@ export default function LandingPage() {
           <div className="mb-8 flex items-end justify-between border-b border-[var(--outline-variant)] pb-4">
             <h2
               className="text-3xl font-medium uppercase tracking-tight text-[var(--on-background)]"
-              style={{ fontFamily: 'var(--font-space-grotesk)' }}
+              style={{ fontFamily: "var(--font-space-grotesk)" }}
             >
               Core Modules
             </h2>
@@ -180,41 +220,45 @@ export default function LandingPage() {
           </div>
 
           <div className="grid grid-cols-1 border border-[var(--outline-variant)] bg-[var(--surface)] md:grid-cols-3">
-            {pillars.map(({ code, label, icon: Icon, description, dataLoad }, i) => (
-              <div
-                key={code}
-                className={[
-                  'flex h-full flex-col p-8 transition-colors hover:bg-[var(--surface-container)]',
-                  i < 2
-                    ? 'border-b border-[var(--outline-variant)] md:border-b-0 md:border-r'
-                    : '',
-                ].join(' ')}
-              >
-                <div className="mb-16 flex items-start justify-between border-b border-[var(--outline-variant)] pb-4">
-                  <span className="font-mono text-xs text-[var(--primary)]">{code}</span>
-                  <Icon className="size-5 text-[var(--on-surface-variant)]" />
-                </div>
-                <h3
-                  className="mb-4 text-3xl font-medium uppercase text-[var(--on-background)]"
-                  style={{ fontFamily: 'var(--font-space-grotesk)' }}
+            {pillars.map(
+              ({ code, label, icon: Icon, description, dataLoad }, i) => (
+                <div
+                  key={code}
+                  className={[
+                    "flex h-full flex-col p-8 transition-colors hover:bg-[var(--surface-container)]",
+                    i < 2
+                      ? "border-b border-[var(--outline-variant)] md:border-b-0 md:border-r"
+                      : "",
+                  ].join(" ")}
                 >
-                  {label}
-                </h3>
-                <p className="mb-8 flex-grow text-base leading-relaxed text-[var(--on-surface-variant)]">
-                  {description}
-                </p>
-                <div className="flex flex-col gap-2 border-t border-[var(--outline-variant)] pt-4 font-mono text-xs text-[var(--on-surface-variant)]">
-                  <div className="flex justify-between">
-                    <span>Status:</span>
-                    <span className="text-[var(--primary)]">Online</span>
+                  <div className="mb-16 flex items-start justify-between border-b border-[var(--outline-variant)] pb-4">
+                    <span className="font-mono text-xs text-[var(--primary)]">
+                      {code}
+                    </span>
+                    <Icon className="size-5 text-[var(--on-surface-variant)]" />
                   </div>
-                  <div className="flex justify-between">
-                    <span>Data Load:</span>
-                    <span>{dataLoad}</span>
+                  <h3
+                    className="mb-4 text-3xl font-medium uppercase text-[var(--on-background)]"
+                    style={{ fontFamily: "var(--font-space-grotesk)" }}
+                  >
+                    {label}
+                  </h3>
+                  <p className="mb-8 flex-grow text-base leading-relaxed text-[var(--on-surface-variant)]">
+                    {description}
+                  </p>
+                  <div className="flex flex-col gap-2 border-t border-[var(--outline-variant)] pt-4 font-mono text-xs text-[var(--on-surface-variant)]">
+                    <div className="flex justify-between">
+                      <span>Status:</span>
+                      <span className="text-[var(--primary)]">Online</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Data Load:</span>
+                      <span>{dataLoad}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         </section>
 
@@ -223,7 +267,7 @@ export default function LandingPage() {
           <div className="mb-8 flex items-end justify-between border-b border-[var(--outline-variant)] pb-4">
             <h2
               className="text-3xl font-medium uppercase tracking-tight text-[var(--on-background)]"
-              style={{ fontFamily: 'var(--font-space-grotesk)' }}
+              style={{ fontFamily: "var(--font-space-grotesk)" }}
             >
               How It Works
             </h2>
@@ -237,16 +281,18 @@ export default function LandingPage() {
               <div
                 key={n}
                 className={[
-                  'flex gap-6 p-8 transition-colors hover:bg-[var(--surface-container)]',
+                  "flex gap-6 p-8 transition-colors hover:bg-[var(--surface-container)]",
                   // right border on left column
-                  i % 2 === 0 ? 'md:border-r border-[var(--outline-variant)]' : '',
+                  i % 2 === 0
+                    ? "md:border-r border-[var(--outline-variant)]"
+                    : "",
                   // bottom border on all but the last row
-                  i < 2 ? 'border-b border-[var(--outline-variant)]' : '',
-                ].join(' ')}
+                  i < 2 ? "border-b border-[var(--outline-variant)]" : "",
+                ].join(" ")}
               >
                 <span
                   className="shrink-0 text-5xl font-bold leading-none tracking-tighter text-[var(--outline-variant)]"
-                  style={{ fontFamily: 'var(--font-space-grotesk)' }}
+                  style={{ fontFamily: "var(--font-space-grotesk)" }}
                 >
                   {n}
                 </span>
@@ -254,7 +300,9 @@ export default function LandingPage() {
                   <h3 className="mb-2 font-mono text-xs uppercase tracking-widest text-[var(--primary)]">
                     {title}
                   </h3>
-                  <p className="text-sm leading-relaxed text-[var(--on-surface-variant)]">{body}</p>
+                  <p className="text-sm leading-relaxed text-[var(--on-surface-variant)]">
+                    {body}
+                  </p>
                 </div>
               </div>
             ))}
@@ -275,13 +323,15 @@ export default function LandingPage() {
                   Household.Terminal // Live Feed
                 </span>
               </div>
-              <span className="font-mono text-xs text-[var(--on-surface-variant)]">TTY_01</span>
+              <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+                TTY_01
+              </span>
             </div>
 
             {/* Ghost wireframe */}
             <div
               className="grid grid-cols-12 opacity-40"
-              style={{ height: 'calc(100% - 44px)' }}
+              style={{ height: "calc(100% - 44px)" }}
             >
               <div className="col-span-3 flex flex-col gap-2 border-r border-[var(--outline-variant)] p-4">
                 <div className="mb-4 h-4 w-2/3 bg-[var(--outline-variant)]" />
@@ -294,9 +344,9 @@ export default function LandingPage() {
               </div>
               <div className="col-span-9 flex flex-col gap-6 p-8">
                 {[
-                  { w: 'w-32', accent: true },
-                  { w: 'w-48', accent: false },
-                  { w: 'w-24', accent: false },
+                  { w: "w-32", accent: true },
+                  { w: "w-48", accent: false },
+                  { w: "w-24", accent: false },
                 ].map(({ w, accent }, i) => (
                   <div
                     key={i}
@@ -305,7 +355,9 @@ export default function LandingPage() {
                     <div className={`h-4 ${w} bg-[var(--outline-variant)]`} />
                     <div
                       className={`h-4 w-16 ${
-                        accent ? 'bg-[var(--primary)]' : 'bg-[var(--surface-variant)]'
+                        accent
+                          ? "bg-[var(--primary)]"
+                          : "bg-[var(--surface-variant)]"
                       }`}
                     />
                   </div>
@@ -318,12 +370,12 @@ export default function LandingPage() {
               className="absolute bottom-0 left-0 w-full"
               style={{
                 height: 128,
-                background: 'linear-gradient(to top, var(--surface-container-lowest), transparent)',
+                background:
+                  "linear-gradient(to top, var(--surface-container-lowest), transparent)",
               }}
             />
           </div>
         </section>
-
       </main>
 
       {/* ── Footer ──────────────────────────────────────────────────────────── */}
@@ -332,7 +384,7 @@ export default function LandingPage() {
           <div className="flex flex-col gap-2">
             <span
               className="text-2xl font-bold uppercase tracking-tighter text-[var(--primary)]"
-              style={{ fontFamily: 'var(--font-space-grotesk)' }}
+              style={{ fontFamily: "var(--font-space-grotesk)" }}
             >
               BAYT
             </span>
@@ -345,7 +397,6 @@ export default function LandingPage() {
           </p>
         </div>
       </footer>
-
     </div>
   );
 }
