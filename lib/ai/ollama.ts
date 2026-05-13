@@ -10,7 +10,7 @@ export const ollamaHealth = ollama.chat(
 )
 
 // Runtime toggle — starts from env var, can be flipped via the toggle API
-// without restarting the server.
+// without restarting the server. Default to false unless specifically turned on.
 let _vaultEnabled = process.env.PRIVACY_VAULT_ENABLED === 'true'
 
 export function isPrivacyVaultEnabled(): boolean {
