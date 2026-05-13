@@ -83,12 +83,13 @@ export default function LandingPage() {
           </span>
           <nav className="hidden items-center gap-8 md:flex">
             {["Operations", "Health", "Connection"].map((item) => (
-              <span
+              <Link
                 key={item}
-                className="cursor-default font-mono text-xs uppercase tracking-widest text-[var(--on-surface-variant)] transition-colors hover:text-[var(--primary)]"
+                href={`/${item.toLowerCase()}`}
+                className="font-mono text-xs uppercase tracking-widest text-[var(--on-surface-variant)] transition-colors hover:text-[var(--primary)]"
               >
                 {item}
-              </span>
+              </Link>
             ))}
           </nav>
           <Link
@@ -222,7 +223,8 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 border border-[var(--outline-variant)] bg-[var(--surface)] md:grid-cols-3">
             {pillars.map(
               ({ code, label, icon: Icon, description, dataLoad }, i) => (
-                <div
+                <Link
+                  href={`/${label.toLowerCase()}`}
                   key={code}
                   className={[
                     "flex h-full flex-col p-8 transition-colors hover:bg-[var(--surface-container)]",
@@ -256,7 +258,7 @@ export default function LandingPage() {
                       <span>{dataLoad}</span>
                     </div>
                   </div>
-                </div>
+                </Link>
               ),
             )}
           </div>
