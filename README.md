@@ -1,5 +1,7 @@
 # Bayt: The Family Operating System
 
+# Link: https://bayt.reilabs.cc/
+
 Bayt is an AI-powered family operating system designed as a dashboard to manage a family's daily life. It features AI agents operating across multiple facets of family coordination, including operations, health, connection, and caregiving. The demo utilizes mock data (seeded into SQLite) centered around the fictional Al-Salem family.
 
 ## Getting Started
