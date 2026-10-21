@@ -47,3 +47,24 @@ const COMPARATIVES = /\b(double|doubled|triple|tripled|twice|thrice|times|half|q
 export function isFaithfulNarrative(text: string, facts: string): boolean {
   return addsNoNumbers(text, facts) && !COMPARATIVES.test(text)
 }
+
+/** Member records carry no gender, so generated text must not assume one. */
+export const GENDERED = /\b(he|she|his|her|hers|him|himself|herself)\b/i
+
+/** "09:30" and "9:30" are the same time: compare figures without leading zeros. */
+const looseNumbersIn = (text: string) => numbersIn(text).map((n) => n.replace(/^0+(?=\d)/, ''))
+
+/**
+ * Comparisons that imply arithmetic. Narrower than COMPARATIVES: a chat answer may say "at these
+ * times" or "half past nine" without inventing a ratio.
+ */
+const RATIOS = /\b(double|doubled|triple|tripled|twice|thrice|\d+x|\w+fold)\b/i
+
+/**
+ * A chat answer written from a fact sheet: every figure it uses is on the sheet (or in the user's
+ * own words), it draws no ratio the sheet does not state, and it assumes no one's gender.
+ */
+export function isFaithfulAnswer(answer: string, allowed: string): boolean {
+  const ok = new Set(looseNumbersIn(allowed))
+  return looseNumbersIn(answer).every((n) => ok.has(n)) && !RATIOS.test(answer) && !GENDERED.test(answer)
+}

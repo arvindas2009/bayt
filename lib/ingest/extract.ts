@@ -1,6 +1,7 @@
 import { differenceInCalendarDays, format, isValid, parse, startOfDay } from 'date-fns'
-import { geminiFlash } from '@/lib/ai/client'
+import { fallbackModel as nvidiaModel } from '@/lib/ai/client'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
+import { logEnvStatusOnce } from '@/lib/env'
 import { getToday } from '@/lib/time/today'
 import { REFERENCE_DURATIONS } from '@/lib/load/reference-durations'
 import type { Family } from '@/types/family'
@@ -12,13 +13,16 @@ import {
   type ExtractionResult,
   type IngestInput,
 } from './types'
+import { MAX_PDF_PAGES } from './decode'
 
 /**
  * Read a document and propose what it asks of the family.
  *
- * Code decides what is acceptable: a date must be real and near, an owner must be a real member,
- * a category and task type must be ones we know, and for text we can search, the quoted words must
- * actually be in the text. The model only reads and proposes. A person confirms before anything is saved.
+ * The document arrives as text (files are decoded on the server first) and only the NVIDIA model
+ * reads it: no Gemini, no failover. Code decides what is acceptable: a date must be real and near,
+ * an owner must be a real member, a category and task type must be ones we know, and the quoted
+ * words must actually be in the text. The model only reads and proposes. A person confirms before
+ * anything is saved.
  */
 
 const MAX_TEXT_CHARS = 20_000
@@ -132,7 +136,7 @@ function readDates(text: string, today: Date): Candidate[] {
 
 // ─── With a model ────────────────────────────────────────────────────────────────
 
-const SYSTEM = `You read one document for a family in the UAE (a school circular, a letter, a bill, an appointment card) and list what it asks the family to do or attend.
+const SYSTEM = `You read the text of one document for a family in the UAE (a school circular, a letter, a bill, an appointment card) and list what it asks the family to do or attend.
 Rules:
 - Only list things the document actually states, each with a date. Skip anything without a date.
 - Never invent a date, amount, place or consequence. Copy dates exactly as written; resolve "next Tuesday" only if today's date lets you do it with certainty, otherwise skip it.
@@ -142,7 +146,7 @@ Rules:
 - Return an empty list if the document asks nothing of the family.`
 
 interface Options {
-  /** No model calls at all (demo mode): only the date reader runs, and only on text. */
+  /** No model calls at all (demo mode): only the date reader runs. */
   offline?: boolean
 }
 
@@ -152,8 +156,10 @@ export async function extractCandidates(
   options: Options = {},
 ): Promise<ExtractionResult & { error?: string }> {
   const today = getToday()
-  const searchable = input.kind === 'text' ? input.text.slice(0, MAX_TEXT_CHARS) : null
+  const searchable = input.text.slice(0, MAX_TEXT_CHARS)
   const notes: string[] = []
+  if (input.source === 'pdf' && input.truncated) notes.push(`Only the first ${MAX_PDF_PAGES} pages were read.`)
+  else if (input.text.length > MAX_TEXT_CHARS) notes.push('This is long, so only the first part was read.')
 
   const aliasToId = new Map<string, string>()
   const roster = family.members
@@ -164,7 +170,6 @@ export async function extractCandidates(
     .join('\n')
 
   const dateOnly = (reason: string): ExtractionResult & { error?: string } => {
-    if (!searchable) return { candidates: [], method: 'dates', notes, error: reason }
     const candidates = readDates(searchable, today)
     notes.push(
       candidates.length > 0
@@ -174,40 +179,24 @@ export async function extractCandidates(
     return { candidates, method: 'dates', notes, error: options.offline ? undefined : reason }
   }
 
-  if (options.offline) {
-    if (!searchable) {
-      return { candidates: [], method: 'dates', notes, error: 'Demo mode reads pasted text only. Paste the text of the document.' }
-    }
-    return dateOnly('')
-  }
+  if (options.offline) return dateOnly('')
+  if (!logEnvStatusOnce().hasNvidia) return dateOnly('NVIDIA_API_KEY is not set')
 
   const header = `Today is ${format(today, 'EEEE d MMMM yyyy')}.\nFamily members (use these aliases only):\n${roster}\n\nDocument: ${input.label}`
   const result = await safeGenerateObject({
-    model: geminiFlash,
+    model: nvidiaModel,
     schema: ExtractionSchema,
     system: SYSTEM,
-    timeoutMs: 40_000,
-    // A file can only be read by a model that accepts files, so never hand it to the text-only fallback.
-    failover: input.kind === 'text',
-    messages: [
-      {
-        role: 'user',
-        content:
-          input.kind === 'text'
-            ? [{ type: 'text', text: `${header}\n\n---\n${searchable}` }]
-            : [
-                { type: 'text', text: header },
-                input.mediaType.startsWith('image/')
-                  ? { type: 'image', image: input.data, mediaType: input.mediaType }
-                  : { type: 'file', data: input.data, mediaType: input.mediaType },
-              ],
-      },
-    ],
+    // The route allows 60 s: leave room to decode the file and answer.
+    timeoutMs: 50_000,
+    // Documents are read by NVIDIA only, never handed on to another provider.
+    failover: false,
+    prompt: `${header}\n\n---\n${searchable}`,
   })
 
   if (!result.ok) return dateOnly(result.error)
 
-  const haystack = searchable ? norm(searchable) : null
+  const haystack = norm(searchable)
   const seen = new Set<string>()
   const candidates: Candidate[] = []
   let dropped = 0
@@ -225,8 +214,8 @@ export async function extractCandidates(
       dropped++
       continue
     }
-    // For text we can search, the quoted words must really be in it: no quote, no item.
-    if (haystack && (quote.length < 6 || !haystack.includes(norm(quote)))) {
+    // The quoted words must really be in the text: no quote, no item.
+    if (quote.length < 6 || !haystack.includes(norm(quote))) {
       dropped++
       continue
     }
@@ -251,11 +240,10 @@ export async function extractCandidates(
       suggestedOwnerId: (item.ownerAlias && aliasToId.get(item.ownerAlias.trim().toLowerCase())) || null,
       consequence: item.consequence.trim(),
       quote,
-      verified: Boolean(haystack),
+      verified: true,
     })
   }
 
   if (dropped > 0) notes.push(`${dropped} possible ${dropped === 1 ? 'item was' : 'items were'} left out because the date or the quoted words did not check out.`)
-  if (!searchable && candidates.length > 0) notes.push('This file was read by a model. Check each item against the original before you save it.')
   return { candidates, method: 'model', notes }
 }

@@ -9,6 +9,8 @@
  *   BASE_URL  default http://localhost:3000. Prefer a server started with NEXT_PUBLIC_DEMO_MODE=true.
  *   WIDTH     viewport width, default 1440.
  *   THEME     dark (default, writes exports/) or light (writes exports/light/).
+ *   SET       app (default) or extras: the Ask Bayt chat, landing page and /login, written to
+ *             exports/chat-landing-login/<theme>/. The chat sends one real question to /api/chat.
  *
  * Output (under exports/)
  *   png/<page>/<state>.png   full-page screenshot (WebGL included)
@@ -30,7 +32,12 @@ const VIEW_H = 900;
 const ROOT = path.resolve(__dirname, '..');
 const THEME = process.env.THEME === 'light' ? 'light' : 'dark';
 // Dark stays in exports/, light goes to exports/light/ so the two sets never overwrite each other.
-const OUT = THEME === 'dark' ? path.join(ROOT, 'exports') : path.join(ROOT, 'exports', 'light');
+// SET=extras exports the Ask Bayt chat, the landing page and /login into their own folder instead.
+const SET = process.env.SET === 'extras' ? 'extras' : 'app';
+const OUT =
+  SET === 'extras'
+    ? path.join(ROOT, 'exports', 'chat-landing-login', THEME)
+    : THEME === 'dark' ? path.join(ROOT, 'exports') : path.join(ROOT, 'exports', 'light');
 const TMP = path.join(OUT, '_pdf');
 
 interface State {
@@ -84,25 +91,72 @@ const STATES: State[] = [
 
 const MEMBERS = ['salem', 'fatima', 'layla', 'khalid', 'aisha'];
 
+// The Briefing's "Ask Bayt" box. The sample question is one of its own suggestion chips, so it is
+// something a person would really ask, and the answer shows Resilience Mode's facts in words.
+const SAMPLE_PROMPT = 'What happens if I am away for two weeks?';
+const CHAT_INPUT = '#ask-bayt-input';
+
+const typeSample = async (p: Page) => {
+  await p.locator(CHAT_INPUT).click();
+  await p.locator(CHAT_INPUT).fill(SAMPLE_PROMPT);
+  await p.waitForTimeout(700);
+};
+
+/** Send the sample question and wait until the answer has stopped changing (the model call can take a while). */
+const askSample = async (p: Page) => {
+  await typeSample(p);
+  await p.keyboard.press('Enter');
+  await p.locator('[role="log"]').waitFor({ timeout: 10000 });
+  let last = '';
+  let same = 0;
+  for (let i = 0; i < 70 && same < 4; i++) {
+    await p.waitForTimeout(1000);
+    const text = await p.locator('[role="log"]').innerText();
+    same = text === last && text.length > SAMPLE_PROMPT.length + 60 ? same + 1 : 0;
+    last = text;
+  }
+  if (same < 4) throw new Error('the answer never settled');
+  // The chat falls back to plain facts when the model is rate-limited; the export wants the AI answer.
+  if (last.includes('AI unavailable')) throw new Error('model unavailable');
+  await p.waitForTimeout(1500);
+};
+
+const EXTRAS: State[] = [
+  { id: 'chat/01-collapsed', route: '/briefing', full: false },
+  { id: 'chat/02-focused-suggestions', route: '/briefing', full: false, steps: async (p) => { await p.locator(CHAT_INPUT).click(); await p.waitForTimeout(900); } },
+  { id: 'chat/03-sample-prompt-typed', route: '/briefing', full: false, steps: typeSample },
+  { id: 'chat/04-answer', route: '/briefing', full: false, steps: askSample },
+  { id: 'chat/05-answer-why-popover', route: '/briefing', full: false, steps: async (p) => { await askSample(p); await p.locator('[role="log"]').getByRole('button', { name: 'Why?' }).first().click(); await p.waitForTimeout(900); } },
+  // Esc shrinks the panel back to the box; the conversation is kept, shown as an answer count beside the field.
+  { id: 'chat/06-collapsed-after-answer', route: '/briefing', full: false, steps: async (p) => { await askSample(p); await p.keyboard.press('Escape'); await p.waitForTimeout(1200); } },
+  { id: 'landing/01-page', route: '/', full: true },
+  { id: 'login/01-page', route: '/login', full: true },
+  { id: 'login/02-card-hover', route: '/login', full: true, steps: async (p) => { await p.getByRole('button', { name: /Continue as Fatima/ }).hover(); await p.waitForTimeout(900); } },
+];
+
 async function settle(p: Page) {
   await p.waitForLoadState('networkidle').catch(() => {});
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(2500);
   // The page scrolls inside <main>, not the window: walk it once so on-scroll reveals fire.
   await p.evaluate(async () => {
+    // The dashboard scrolls inside <main>; the landing page and /login scroll the window.
     const main = document.querySelector('main');
-    if (!main) return;
-    for (let y = 0; y < main.scrollHeight; y += 400) {
-      main.scrollTo(0, y);
+    const scroller = main && main.scrollHeight > main.clientHeight + 4 ? main : null;
+    const total = scroller ? scroller.scrollHeight : document.documentElement.scrollHeight;
+    for (let y = 0; y < total; y += 400) {
+      if (scroller) scroller.scrollTo(0, y); else window.scrollTo(0, y);
       await new Promise((r) => setTimeout(r, 80));
     }
-    main.scrollTo(0, 0);
+    if (scroller) scroller.scrollTo(0, 0); else window.scrollTo(0, 0);
   });
   await p.waitForTimeout(500);
 }
 
 /** <main> is h-screen + overflow-y-auto, so grow the viewport until it fits all the content. */
 async function fitViewport(p: Page): Promise<number> {
+  // The landing hero is min-h-[100svh]: left alone it grows with the viewport we are growing, forever.
+  await p.addStyleTag({ content: '[class*="min-h-[100svh]"]{min-height:' + VIEW_H + 'px!important}' });
   let h = VIEW_H;
   for (let i = 0; i < 3; i++) {
     const need = await p.evaluate(() => {
@@ -139,7 +193,8 @@ async function snapshotCanvases(p: Page): Promise<CanvasSnap[]> {
   for (const b of boxes) {
     if (!b.shown) { out.push({ png: '', dx: 0, dy: 0, w: 0, h: 0 }); continue; }
     await p.addStyleTag({ content: `canvas[data-snap="${b.i}"]{visibility:visible!important}` }).then(async (tag) => {
-      const buf = await p.screenshot({ clip: { x: b.x, y: b.y, width: b.w, height: b.h }, omitBackground: true });
+      // A full-page-sized canvas at 2x is tens of MB of base64 and makes the PDF fail: use 1x for those.
+      const buf = await p.screenshot({ clip: { x: b.x, y: b.y, width: b.w, height: b.h }, omitBackground: true, scale: b.w * b.h > 4_000_000 ? 'css' : 'device' });
       out.push({ png: 'data:image/png;base64,' + buf.toString('base64'), dx: b.x - b.bx, dy: b.y - b.by, w: b.w, h: b.h });
       await tag.evaluate((el) => (el as Element).remove());
     });
@@ -155,9 +210,10 @@ async function capture(p: Page, s: State, pdfs: Array<[string, string]>) {
   const h = s.full ? await fitViewport(p) : VIEW_H;
   const pngPath = path.join(OUT, 'png', s.id + '.png');
   fs.mkdirSync(path.dirname(pngPath), { recursive: true });
-  await p.screenshot({ path: pngPath });
+  // Chromium cannot draw an image taller than 16384 device pixels, so very tall pages drop to 1x.
+  if (!process.env.NO_PNG) await p.screenshot({ path: pngPath, scale: h * 2 > 16000 ? 'css' : 'device' });
 
-  const canvases = await snapshotCanvases(p);
+  const canvases = process.env.NO_CANVAS ? [] : await snapshotCanvases(p);
   await p.evaluate((snaps) => {
     snaps.forEach((s, i) => {
       const c = document.querySelector(`canvas[data-snap="${i}"]`);
@@ -176,7 +232,18 @@ async function capture(p: Page, s: State, pdfs: Array<[string, string]>) {
   await p.emulateMedia({ media: 'screen' });
   const pdfPath = path.join(TMP, s.id.replace('/', '__') + '.pdf');
   fs.mkdirSync(TMP, { recursive: true });
-  await p.pdf({ path: pdfPath, width: `${WIDTH}px`, height: `${h}px`, printBackground: true, pageRanges: '1', margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+  const printPdf = () => p.pdf({ width: `${WIDTH}px`, height: `${h}px`, printBackground: true, pageRanges: '1', margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+  let pdf: Buffer;
+  try {
+    pdf = await printPdf();
+  } catch (err) {
+    // Chromium sometimes fails to stream a very tall page after animations ran: freeze them and retry.
+    console.log(`  pdf failed (${(err as Error).message.slice(0, 80)}), retrying with animations frozen (h=${h})`);
+    await p.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' });
+    await p.waitForTimeout(500);
+    pdf = await printPdf();
+  }
+  fs.writeFileSync(pdfPath, pdf);
   const svgPath = path.join(OUT, 'svg', s.id + '.svg');
   fs.mkdirSync(path.dirname(svgPath), { recursive: true });
   pdfs.push([pdfPath, svgPath]);
@@ -184,10 +251,13 @@ async function capture(p: Page, s: State, pdfs: Array<[string, string]>) {
 
 async function main() {
   const filter = process.argv[2]?.toLowerCase();
-  const states: State[] = [
-    ...STATES,
-    ...MEMBERS.map((m, i): State => ({ id: `health/${String(4 + i).padStart(2, '0')}-member-${m}`, route: `/health/mem_${m}`, full: true })),
-  ].filter((s) => !filter || s.id.includes(filter));
+  const states: State[] = (SET === 'extras'
+    ? EXTRAS
+    : [
+        ...STATES,
+        ...MEMBERS.map((m, i): State => ({ id: `health/${String(4 + i).padStart(2, '0')}-member-${m}`, route: `/health/mem_${m}`, full: true })),
+      ]
+  ).filter((s) => !filter || s.id.includes(filter));
 
   if (!filter) {
     fs.rmSync(path.join(OUT, 'svg'), { recursive: true, force: true });
@@ -210,17 +280,26 @@ async function main() {
 
   for (const s of states) {
     process.stdout.write(`${s.id.padEnd(40)} `);
-    try {
-      await page.setViewportSize({ width: WIDTH, height: VIEW_H });
-      await page.goto(BASE_URL + s.route, { waitUntil: 'domcontentloaded' });
-      await settle(page);
-      const theme = await page.evaluate(() => document.documentElement.dataset.theme);
-      if (theme !== THEME) throw new Error(`theme is ${theme}, not ${THEME}`);
-      await s.steps?.(page);
-      await capture(page, s, pdfs);
-      console.log('ok');
-    } catch (err) {
-      console.log(`SKIPPED: ${(err as Error).message.split('\n')[0]}`);
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        await page.setViewportSize({ width: WIDTH, height: VIEW_H });
+        await page.goto(BASE_URL + s.route, { waitUntil: 'domcontentloaded' });
+        await settle(page);
+        const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+        if (theme !== THEME) throw new Error(`theme is ${theme}, not ${THEME}`);
+        await s.steps?.(page);
+        await capture(page, s, pdfs);
+        console.log(attempt > 1 ? `ok (attempt ${attempt})` : 'ok');
+        break;
+      } catch (err) {
+        const msg = (err as Error).message.split('\n')[0];
+        if (msg === 'model unavailable' && attempt < 4) {
+          await page.waitForTimeout(20000);
+          continue;
+        }
+        console.log(`SKIPPED: ${msg}`);
+        break;
+      }
     }
   }
   await browser.close();

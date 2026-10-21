@@ -68,7 +68,7 @@ npx prisma studio
 | `DATABASE_URL` | SQLite path, e.g. `file:./dev.db`. Must be in `.env` too, because the Prisma CLI reads only `.env` |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini key. The SDK reads it by this exact name |
 | `NVIDIA_API_KEY` | NVIDIA build key for the fallback model |
-| `NVIDIA_MODEL` | Fallback model id. Default `nvidia/nemotron-3-super-120b-a12b`. NVIDIA retires models without notice (the old default returned `410 Gone`), so check build.nvidia.com |
+| `NVIDIA_MODEL` | Fallback model id. Default `nvidia/nemotron-3.5-lightning-30b-a3b`. NVIDIA retires models without notice (an old default returned `410 Gone`, `nemotron-3-super-120b-a12b` later returned `404 Not found for account`, and `nemotron-3-ultra-550b-a55b` was too slow: Ask Bayt calls hit the 40 s budget), so check build.nvidia.com |
 | `PRIVACY_VAULT_ENABLED` | Default for the vault only. Once toggled in the app, the stored setting wins |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Local model for the vault. Defaults `http://localhost:11434/v1`, `deepseek-r1:8b` |
 | `NEXT_PUBLIC_DEMO_MODE` | `true` = no model calls. All deterministic code still runs on the seeded database |
@@ -105,7 +105,7 @@ NVIDIA specifics (`lib/ai/client.ts`):
 ### Configuration
 
 - **Gemini** (`GOOGLE_GENERATIVE_AI_API_KEY`) and **NVIDIA** (`NVIDIA_API_KEY`) are both set in `.env.local`. Gemini answers every call. NVIDIA steps in only when Gemini is rate-limited, over quota or overloaded.
-- PDF and image upload in the inbox is read by Gemini (multimodal) and has no fallback, because the NVIDIA model is text-only. Pasted text and text files use Gemini, with NVIDIA as backup.
+- The inbox is the exception: it uses NVIDIA only, never Gemini. Uploaded PDFs are turned into text on the server first (`unpdf`), because the NVIDIA model is text-only; images are not accepted.
 - Keep the keys out of git (`.env*` is gitignored) and rotate any key that has been committed.
 
 ## 4. Design principles
@@ -139,6 +139,7 @@ One calm column, written for the member chosen in "Viewing as":
 - **Time together** (`MicroActions`): up to two small connection actions from the stored Connection run.
 - **How:** `GET /api/briefing` returns the stored briefing plus a live overlay (load, priority, memory of the day recomputed on every request so a handoff or new memory shows at once). `GET /api/briefing/member/[memberId]` returns the per-member wording. Components: `PriorityHero`, `TimeBack`, `MicroActions`, `MemoryComposer`, `HandoffInbox`.
 - **Persona by member** (`adaptive-briefing.ts`): grandparent gets simple, warm language with reminders first; child under 13 gets very short encouraging sentences; teenager gets a friendly peer tone; the parent carrying the most load (score 50+) gets a supportive tone; other parents get a direct logistics-first tone. Persona comes from role, age and load, never from a first name.
+- **Ask Bayt** (`AskBayt`): a floating box at the bottom of the page for questions about the family and the app (see 6.21).
 - **Use:** open the page; switch "Viewing as" in the top bar to see another member's briefing.
 - **Needs:** seeded database. In demo mode the first visit composes a briefing with no model.
 
@@ -150,7 +151,7 @@ One calm column, written for the member chosen in "Viewing as":
 - **Needs:** seeded database. The stress test needs no model.
 
 ### 5.5 Operations `/operations`
-- **Drop anything** (inbox): drop a PDF, image or text file, or paste text. Described in section 6.4.
+- **Drop anything** (inbox): drop a PDF or text file, or paste text. Described in section 6.4.
 - **The week's meals** (`MealPlanGrid`): 7 days x breakfast/lunch/dinner. Each dish shows member dots for who it suits. A dialog lists who it suits and what the others get instead.
 - **Family agenda** (`FamilyAgenda`): the week's calendar, with an "Add event" modal that flags any new clash.
 - **Conflicts** (`CalendarConflicts`): clashes with names (not ids), a suggested fix, and a "Why?" popover.
@@ -206,12 +207,12 @@ One calm column, written for the member chosen in "Viewing as":
 
 ### 6.4 Drop-anything inbox
 - **What:** turn a document into tasks and events, with a person confirming everything.
-- **Use:** in Operations, drop a PDF/PNG/JPG/WebP/text file (max 8 MB) or paste text. Review the proposed items (each shows the exact quoted words and "counted as about N minutes"), edit title/date/owner, choose an owner, then Save.
-- **How:** `POST /api/inbox` reads and proposes only, and saves nothing. `POST /api/inbox/confirm` re-validates everything and saves `Obligation`s (`sourceType: 'inbox'`) or `CalendarEvent`s, then re-detects conflicts. Code in `lib/ingest/`: an adapter turns the upload into an input (the interface also fits email or calendar feeds later); one extractor reads any input.
-- **Code decides:** members reach the model as aliases (m1, m2), never ids. Dates are read by code first (`findDate`, dd/mm/yyyy). For text, an item whose quote is not found in the text is dropped. Task type and obligation-vs-event are corrected by keyword rules (the fallback model had misfiled fees as events). Dates must be real and within -30 to +800 days. Up to 8 candidates per document, 12 per confirm.
-- **Models:** files use Gemini only (`failover: false`, multimodal). Text uses Gemini, or NVIDIA if Gemini is down. In demo mode only a built-in date reader runs on pasted text. If the model fails on text, the date reader is used and the screen says so.
-- **Privacy notice on screen:** the file or text goes to an AI model and is not kept.
-- **Not yet exercised end to end:** PDF/image upload and the drag-and-drop gesture.
+- **Use:** in Operations, drop a PDF or text file (max 8 MB) or paste text. Photos and scanned PDFs (no text layer) are refused with a "paste the text instead" message. Review the proposed items (each shows the exact quoted words and "counted as about N minutes"), edit title/date/owner, choose an owner, then Save.
+- **How:** `POST /api/inbox` reads and proposes only, and saves nothing. `POST /api/inbox/confirm` re-validates everything and saves `Obligation`s (`sourceType: 'inbox'`) or `CalendarEvent`s, then re-detects conflicts. Code in `lib/ingest/`: an adapter turns the upload into text (`decode.ts` `decodePdf` reads a PDF's text layer locally, up to 20 pages; the interface also fits email or calendar feeds later); one extractor reads any input.
+- **Code decides:** members reach the model as aliases (m1, m2), never ids. Dates are read by code first (`findDate`, dd/mm/yyyy). An item whose quote is not found in the text is dropped (every input is text now, so this applies to PDFs too). Task type and obligation-vs-event are corrected by keyword rules (the fallback model had misfiled fees as events). Dates must be real and within -30 to +800 days. Up to 8 candidates per document, 12 per confirm.
+- **Models:** NVIDIA only (`fallbackModel`, `failover: false`), for files and pasted text alike. In demo mode, or with no `NVIDIA_API_KEY`, only the built-in date reader runs (PDFs included, since decoding needs no model). If the model fails, the date reader is used and the screen says so.
+- **Privacy notice on screen:** the file is turned into text on this computer and only the text goes to an NVIDIA model; nothing is kept.
+- **Verified 2026-10-22:** a text PDF through the built app (NVIDIA, 3 items, quotes checked), a scan (422) and a PNG (415). **Not yet exercised:** the drag-and-drop gesture.
 
 ### 6.5 Evidence trail ("Why?")
 - **What:** a "Why?" popover (`components/ui/WhyPopover.tsx`) on priorities, conflicts and load rows showing the real records behind a statement, with titles, dates and owners.
@@ -276,6 +277,14 @@ Global `prefers-reduced-motion` handling and `useMotionOK()`; visible focus ring
 ### 6.20 Design system
 "Desert dusk" tokens in `app/globals.css`: `--bg`, `--surface`, `--surface-raised`, `--surface-high`, `--ink`, `--ink-muted`, `--sand`, `--on-sand`, `--ember`, `--ember-soft`, `--palm`, `--dusk`, `--line`, `--line-strong`. Fonts: Fraunces (display), Inter (body), JetBrains Mono (numerals only, `.num`), IBM Plex Sans Arabic. One member palette (`lib/design/members.ts`), assigned by position, never by name. Rules: one hero number per screen, no repeated numbers, no decorative widgets, detail behind "Why?".
 
+### 6.21 Ask Bayt (chat on the Briefing and every other page)
+- **What:** ask about the family or the app ("Who carries the most this week?", "What is due before Friday?", "What if Fatima is away?", "How do I hand a task over?"). A floating box at the bottom of `/briefing`; the first question grows it into a chat panel (framer `layout` spring). Minimise or Esc shrinks it back and keeps the conversation. One conversation per "Viewing as" person, kept until the page reloads. Suggestions come from the family's own data.
+- **On every other dashboard page** (`AskBaytCorner`, mounted in the dashboard layout, hidden on `/briefing`): a small round AI button in the bottom-right corner that widens on hover or keyboard focus to read "Ask Bayt", with a count badge once there are answers. Clicking springs it into a corner panel with the same conversation; the first suggestion fits the page (Operations: what is due; Health: who gives the medications; Settings: the Privacy Vault). Changing page closes the panel so the page can be seen. Shared pieces live in `components/chat/parts.tsx`.
+- **How (code decides, the model writes):** `lib/chat/facts.ts` `buildFactSheet()` writes a numbered fact sheet from the deterministic modules (load, priorities, conflicts, next 7 days of calendar, open obligations, pending handoffs, bus factor and a 14-day stress test per member who carries load, who gives each medication, appointments, Time Dividend, what each page does). `lib/chat/answer.ts` sends it to Gemini (NVIDIA fallback) through `safeGenerateObject`, asking for `{answer, factIds, page}`. The answer is shown only if `isFaithfulAnswer()` passes (every figure on the sheet or in the question, no ratios, no gendered pronouns); "Why?" opens the cited facts' records and "Open …" links to the suggested page.
+- **Without a model** (demo mode, model unavailable, or answer rejected): `matchFacts()` scores the facts by the people named and the topic words, and the top 3 are shown verbatim, labelled as such.
+- **Privacy:** no condition, medication name, dose or lab value is on the sheet. Health appointment titles become "medical appointment", and any title that contains one of this family's condition or medication words is replaced with a generic label. A question that names one is never sent to a model: it is answered from who-gives-what and points to Health.
+- **API:** `POST /api/chat {question (1-500 chars), viewerId, history (max 8 turns)}` returns `{text, sources, page, mode}` with `mode` = `ai` | `demo` | `unavailable` | `unchecked` | `private`. Reads only; nothing is stored.
+
 ## 7. Deterministic engine (`lib/`)
 
 | Module | Job |
@@ -297,7 +306,8 @@ Global `prefers-reduced-motion` handling and `useMotionOK()`; visible focus ring
 | `evidence/resolve.ts` | Resolve source refs, dropping unknown ids |
 | `utils/cultural-context.ts`, `data/cultural-calendar.ts` | Seasons, Ramadan, Eid, school terms |
 | `utils/invisible-hours.ts` | View of the load model for category cards |
-| `ai/guards.ts` | `isFaithfulRewrite`, `isFaithfulNarrative`, `keepsNumbers`, `addsNoNumbers` |
+| `ai/guards.ts` | `isFaithfulRewrite`, `isFaithfulNarrative`, `isFaithfulAnswer`, `keepsNumbers`, `addsNoNumbers`, `GENDERED` |
+| `chat/facts.ts`, `chat/answer.ts` | Ask Bayt: fact sheet with health redaction, model answer + guard, no-model fact matching |
 | `data/refresh.ts`, `seed.ts`, `mock-family.ts` | Relative-date seed and re-anchoring |
 
 **Faithfulness guards** (`lib/ai/guards.ts`): a model's rewrite is accepted only if it keeps every number from the original, adds no new number, and does not grow beyond 1.5x + 30 characters. Narrative text is also rejected if it uses comparisons the code did not compute ("double", "triple", "half"...). Otherwise the deterministic text is kept.
@@ -382,7 +392,7 @@ Resetting the real `dev.db`; rotating the NVIDIA and Stitch keys; committing (no
 
 ## 13. Known gaps and untested paths
 
-- Not yet exercised end to end: PDF/image inbox and the live runbook rewording. The NVIDIA fallback path has been run with real calls.
+- Not yet exercised end to end: the live runbook rewording. The NVIDIA fallback path has been run with real calls.
 - Not checked in a browser: the load visual's shader (the automation tab reports hidden, so it pauses), other "Viewing as" members (for example Aisha's larger type), Arabic text, `/operations/meal-plan`, the drag-and-drop gesture.
 - Wearable figures (heart rate, sleep, steps) are simulated seed numbers and are labelled so.
 - Cultural calendar: school terms are approximate and Eid dates carry ±3 days.

@@ -5,7 +5,8 @@ import { REFERENCE_DURATIONS } from '@/lib/load/reference-durations'
  * The drop-anything inbox.
  *
  * An adapter turns something a person hands Bayt (an uploaded file, pasted text, later an email or a
- * calendar feed) into an `IngestInput`. One extractor reads any input and returns CANDIDATES.
+ * calendar feed) into an `IngestInput`, which is always plain text: files are decoded on the server
+ * first, because the reading model is text-only. One extractor reads any input and returns CANDIDATES.
  * Nothing is saved until a person reviews and confirms them.
  */
 
@@ -17,9 +18,25 @@ export const EVENT_CATEGORIES = [
 
 const TASK_TYPES = Object.keys(REFERENCE_DURATIONS) as [string, ...string[]]
 
-export type IngestInput =
-  | { kind: 'text'; text: string; label: string }
-  | { kind: 'file'; data: Uint8Array; mediaType: string; label: string }
+export interface IngestInput {
+  kind: 'text'
+  text: string
+  label: string
+  /** Where the text came from: decoded from a PDF, read from a text file, or pasted. */
+  source: 'pdf' | 'file' | 'paste'
+  /** True when the decoder stopped before the end of the document. */
+  truncated?: boolean
+}
+
+/** A document Bayt cannot take, with a message a person can act on. */
+export class IngestError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
+    super(message)
+  }
+}
 
 /** A source of documents. Upload is the first; email and calendar feeds would implement the same shape. */
 export interface IngestAdapter<Raw> {
@@ -93,9 +110,6 @@ export const ConfirmBodySchema = z.object({ items: z.array(ConfirmItemSchema).mi
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 export const ACCEPTED_FILE_TYPES: Record<string, string> = {
   'application/pdf': 'PDF',
-  'image/png': 'image',
-  'image/jpeg': 'image',
-  'image/webp': 'image',
   'text/plain': 'text',
   'text/markdown': 'text',
 }

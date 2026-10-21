@@ -28,8 +28,8 @@ const FIELD =
   'w-full rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--sand-text)]'
 
 /**
- * Drop anything: a PDF, a photo of a letter, or pasted text. Bayt reads it and proposes what it asks
- * of the family. Nothing is saved until the person reviews each item and confirms.
+ * Drop anything: a PDF, a text file, or pasted text. The server turns it into text and Bayt reads it
+ * and proposes what it asks of the family. Nothing is saved until the person reviews each item and confirms.
  */
 export default function DropInbox({ demo }: { demo: boolean }) {
   const { members, nameOf } = useMemberLookup()
@@ -270,23 +270,23 @@ export default function DropInbox({ demo }: { demo: boolean }) {
             ref={fileRef}
             id={`${inputId}-file`}
             type="file"
-            accept="application/pdf,image/png,image/jpeg,image/webp,text/plain,text/markdown,.pdf,.txt,.md"
+            accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md"
             className="sr-only"
-            disabled={busy || demo}
+            disabled={busy}
             onChange={(e) => onFile(e.target.files?.[0])}
           />
           <label
             htmlFor={`${inputId}-file`}
-            aria-disabled={busy || demo}
+            aria-disabled={busy}
             className={`flex items-center gap-2 rounded-full border border-[var(--line-strong)] px-4 py-2 text-sm text-[var(--ink)] transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-[var(--sand-text)] ${
-              busy || demo ? 'opacity-50' : 'cursor-pointer hover:bg-[var(--surface-raised)]'
+              busy ? 'opacity-50' : 'cursor-pointer hover:bg-[var(--surface-raised)]'
             }`}
           >
             <FileUp className={`size-4 transition-transform ${dragging ? '-translate-y-1' : ''}`} aria-hidden />
             Choose a file
           </label>
           <span className="text-sm text-[var(--ink-muted)]">
-            {demo ? 'Demo mode runs no model, so files are off. Paste text instead.' : 'or drop a PDF or image here'}
+or drop a PDF or text file here
           </span>
         </div>
 
@@ -313,8 +313,8 @@ export default function DropInbox({ demo }: { demo: boolean }) {
           </button>
           <p className="text-xs text-[var(--ink-muted)]">
             {demo
-              ? 'The text stays on this computer.'
-              : 'The file or text is sent to an AI model to be read (Google Gemini, or NVIDIA for text if Gemini is down). Bayt does not keep the file.'}
+              ? 'The file or text stays on this computer.'
+              : 'Bayt turns the file into text on this computer and sends only the text to an NVIDIA model to be read. Bayt does not keep the file.'}
           </p>
         </div>
 

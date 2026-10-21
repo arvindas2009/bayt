@@ -94,7 +94,7 @@ export async function safeGenerateObject<
       ...generateObjectOptions,
       abortSignal: primarySignal,
     } as Opts)
-    logTokenUsage('primary', result.usage)
+    logTokenUsage(generateObjectOptions.model === fallbackModel ? NVIDIA_MODEL_ID : 'primary', result.usage)
     return { ok: true, data: result.object as GenerateObjectResultType<SCHEMA, OUTPUT> }
   } catch (primaryError) {
     const noFallbackProvider = generateObjectOptions.model === fallbackModel || !failover

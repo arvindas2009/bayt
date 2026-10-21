@@ -27,6 +27,7 @@ import { CARD, IconBadge } from '@/components/ui/Card';
 import { Reveal } from '@/components/motion/Reveal';
 import PageHeader from '@/components/layout/PageHeader';
 import PinnedBoard from '@/components/pins/PinnedBoard';
+import AskBayt from '@/components/chat/AskBayt';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/components/ui/Button';
 import type { MemberBriefing } from '@/types/agents';
 import { getToday } from '@/lib/time/today'
@@ -201,7 +202,7 @@ export default function BriefingPage() {
   const myLoad = figures.find((f) => f.memberId === activeMemberId);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-10 pb-20 pt-8">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-10 pb-36 pt-8">
       <PageHeader
         shortTitle="Briefing"
         title={
@@ -280,6 +281,8 @@ export default function BriefingPage() {
       <TimeBack briefing={currentBriefing} large={large} />
 
       <MicroActions actions={agentOutputs.connection?.microActions} />
+
+      <AskBayt />
     </div>
   );
 }

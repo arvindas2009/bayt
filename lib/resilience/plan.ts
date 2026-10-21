@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { geminiFlash } from '@/lib/ai/client'
-import { addsNoNumbers } from '@/lib/ai/guards'
+import { GENDERED, addsNoNumbers } from '@/lib/ai/guards'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
 import { BURNOUT_THRESHOLD, WEEKLY_CAPACITY_HOURS, referenceFor } from '@/lib/load/reference-durations'
 import type { Family } from '@/types/family'
@@ -120,8 +120,6 @@ export function buildHandoverPlan(family: Family, sim: AbsenceResult): HandoverP
 
   return { entries, proposals, unplaced: entries.filter((e) => !e.toId).length, reworded: false }
 }
-
-const GENDERED = /\b(he|she|his|her|hers|him|himself|herself)\b/i
 
 const RunbookSchema = z.object({
   runbooks: z

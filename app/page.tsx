@@ -141,7 +141,7 @@ export default function LandingPage() {
         </nav>
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <Link href="/briefing" className={`${pillOutline} px-5 py-2 text-sm`}>
+          <Link href="/login" className={`${pillOutline} px-5 py-2 text-sm`}>
             Open Bayt
           </Link>
         </div>
@@ -176,7 +176,7 @@ export default function LandingPage() {
                 only when someone agrees to take it.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link href="/briefing" className={`${pillPrimary} px-6 py-3 text-base`}>
+                <Link href="/login" className={`${pillPrimary} px-6 py-3 text-base`}>
                   Open Bayt
                   <ArrowRight className="size-4" aria-hidden />
                 </Link>
@@ -478,7 +478,7 @@ export default function LandingPage() {
               </li>
             ))}
           </ul>
-          <Link href="/briefing" className={`${pillPrimary} px-7 py-3.5 text-lg`}>
+          <Link href="/login" className={`${pillPrimary} px-7 py-3.5 text-lg`}>
             Open Bayt
             <ArrowRight className="size-5" aria-hidden />
           </Link>

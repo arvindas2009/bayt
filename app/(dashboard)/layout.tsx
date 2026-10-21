@@ -4,6 +4,7 @@ import FamilyHydrator from '@/components/layout/FamilyHydrator';
 import SimDateGate from '@/components/layout/SimDateGate';
 import PageTransition from '@/components/layout/PageTransition';
 import AmbientFieldLazy from '@/components/visual/AmbientFieldLazy';
+import AskBaytCorner from '@/components/chat/AskBaytCorner';
 
 export default function DashboardLayout({
   children,
@@ -23,6 +24,7 @@ export default function DashboardLayout({
             {children}
           </PageTransition>
         </main>
+        <AskBaytCorner />
       </SimDateGate>
     </div>
   );

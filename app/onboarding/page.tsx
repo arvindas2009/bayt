@@ -11,7 +11,7 @@ const STEPS = ['Your household', 'What Bayt reads', 'Ready'] as const
 
 const READS = [
   { title: 'Your calendar and records', body: 'Events, medications, appointments and deadlines that are already in Bayt, each with someone who owns it.' },
-  { title: 'Documents you drop in', body: 'A school circular, a bill or a photo of a letter. Bayt proposes the tasks and dates, and you confirm before anything is saved.' },
+  { title: 'Documents you drop in', body: 'A school circular, a bill or a letter, as a PDF or pasted text. Bayt proposes the tasks and dates, and you confirm before anything is saved.' },
   { title: 'Nothing else', body: 'Bayt is not connected to Google Calendar, a wearable, WhatsApp or a school portal in this version, and it does not read anything outside what you give it.' },
 ]
 
@@ -142,7 +142,7 @@ export default function OnboardingPage() {
               )}
             </p>
             <div className="mt-10 flex items-center gap-4">
-              <Link href="/briefing" className={BUTTON}>
+              <Link href="/login" className={BUTTON}>
                 Open Bayt <ArrowRight className="size-4" aria-hidden />
               </Link>
               <button

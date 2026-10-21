@@ -4,7 +4,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 export const geminiFlash = google('gemini-2.5-flash')
 export const geminiPro = google('gemini-2.5-pro')
 
-export const NVIDIA_MODEL_ID = process.env.NVIDIA_MODEL ?? 'nvidia/nemotron-3-super-120b-a12b'
+export const NVIDIA_MODEL_ID = process.env.NVIDIA_MODEL ?? 'nvidia/nemotron-3.5-lightning-30b-a3b'
 
 const nvidia = createOpenAI({
   baseURL: 'https://integrate.api.nvidia.com/v1',
@@ -32,9 +32,11 @@ const nvidia = createOpenAI({
 
 /**
  * Fallback model, via NVIDIA build. Used automatically when Gemini is rate-limited, overloaded or
- * has no valid key. Configurable because NVIDIA retires models: the previous default
- * (nemotron-3-nano-30b-a3b) was removed and returned `410 Gone`, which silently turned every
- * fallback call into sample data. Tested with structured (JSON-schema) output.
+ * has no valid key. Configurable because NVIDIA retires models: nemotron-3-nano-30b-a3b was removed
+ * and returned `410 Gone`, which silently turned every fallback call into sample data, and
+ * nemotron-3-super-120b-a12b later returned `404 Function not found for account`. nemotron-3-ultra-550b-a55b worked but often ran past
+ * the 40 s fallback budget. Tested with
+ * structured (JSON-schema) output.
  * Check https://build.nvidia.com for what is currently served.
  */
 // Must use .chat() explicitly: @ai-sdk/openai v3 default callable always routes to the

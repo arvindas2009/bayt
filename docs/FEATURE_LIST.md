@@ -394,11 +394,11 @@ Pin: **Drop anything** (shown as a full-width card on the Briefing). Turn a docu
 
 | Control | Detail |
 |---|---|
-| **Choose a file** / drop zone | Accepts PDF, PNG, JPG, WebP, TXT or Markdown, **up to 8 MB**. The drop zone lights up as a file is dragged over it. In demo mode the file chooser is disabled and a note says "Demo mode runs no model, so files are off. Paste text instead." |
+| **Choose a file** / drop zone | Accepts PDF, TXT or Markdown, **up to 8 MB**. The drop zone lights up as a file is dragged over it. A PDF is turned into text on the server; a scanned PDF (no text in it) or a photo is refused with "paste the text instead". Works in demo mode too (only the date reader runs). |
 | **Paste text** box | For text. |
 | **Read it** | Enabled once the pasted text is at least 8 characters. Shows "Reading *file name*…" while working. |
 
-A privacy line on screen says the file or text is sent to an AI model (Gemini, or NVIDIA for text if Gemini is down) and Bayt does not keep the file. In demo mode: "The text stays on this computer."
+A privacy line on screen says Bayt turns the file into text on this computer and sends only the text to an NVIDIA model, and does not keep the file. In demo mode: "The file or text stays on this computer."
 
 **Step 2: review.** The heading says "Found *n* items in *source*". For each proposed item:
 
@@ -706,7 +706,7 @@ These come straight from the code and are worth knowing before a demo.
 8. **Only one season chip shows at a time** in the top bar, in the order Ramadan, Dust Season, Summer Heat, Exam Period, even if several apply (Settings lists all of them).
 9. **Pins are per browser and per person.** They are not in the database and do not follow you to another device.
 10. **The wearable block is simulated.** Bayt is connected to no wearable, calendar, WhatsApp or school portal.
-11. **PDF and image reading** (via Gemini) and drag-and-drop have been built but not exercised end to end; the pasted-text path has.
+11. **Drag-and-drop** has been built but not exercised end to end; choosing a PDF and pasting text have. Photos and scanned PDFs are not read (no OCR).
 
 ---
 

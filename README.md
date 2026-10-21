@@ -32,8 +32,8 @@ npm run dev                            # http://localhost:3000
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | SQLite file, for example `file:./dev.db` |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini, the primary model. It is also the only model that reads PDFs and images |
-| `NVIDIA_API_KEY` | Nemotron fallback, used on rate limit, quota, auth or overload errors |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini, the primary model |
+| `NVIDIA_API_KEY` | Nemotron fallback, used on rate limit, quota, auth or overload errors. Also the only model that reads inbox documents (PDFs are turned into text on the server first) |
 | `PRIVACY_VAULT_ENABLED` | Start with health analysis on the local model |
 | `OLLAMA_BASE_URL` | Local model for the Privacy Vault |
 | `NEXT_PUBLIC_DEMO_MODE` | `true` runs with no model calls and shows the date simulator |
