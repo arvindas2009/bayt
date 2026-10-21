@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/db/prisma'
+import { markDetectedConflicts } from '@/lib/ops/conflicts-db'
 
 export async function POST(req: NextRequest) {
   let body: Record<string, unknown>
@@ -25,10 +26,15 @@ export async function POST(req: NextRequest) {
       memberId,
       title,
       date: new Date(date),
-      category,
+      category: String(category).toLowerCase(),
       conflict: false,
     },
   })
+
+  // Flag any clash this event creates (it may also flag the event it clashes with).
+  const member = await prisma.familyMember.findUnique({ where: { id: memberId }, select: { familyId: true } })
+  if (member) await markDetectedConflicts(member.familyId)
+  const saved = await prisma.calendarEvent.findUnique({ where: { id: event.id } })
 
   return NextResponse.json({
     id: event.id,
@@ -36,7 +42,7 @@ export async function POST(req: NextRequest) {
     title: event.title,
     date: event.date.toISOString(),
     category: event.category,
-    conflict: event.conflict,
+    conflict: saved?.conflict ?? event.conflict,
   }, { status: 201 })
 }
 

@@ -31,6 +31,10 @@ export interface Medication {
   dosage: string
   frequency: string
   interactions: string[]
+  /** Who administers / refills it. Defaults to the patient when absent. */
+  ownerId?: string
+  /** Members able to cover if the owner cannot. */
+  backupIds?: string[]
 }
 
 export interface HealthProfile {
@@ -41,14 +45,66 @@ export interface HealthProfile {
   riskFlags: string[]
 }
 
+/** Lowercase on purpose: normalised at every data boundary (seed, insert, row parser). */
+export type EventCategory =
+  | 'education' | 'work' | 'health' | 'medical' | 'caregiving' | 'extracurricular'
+  | 'social' | 'family' | 'travel' | 'chores' | 'personal'
+
+export type Recurrence = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+
 export interface CalendarEvent {
   id: string
   memberId: string
   title: string
   date: string
+  /** An EventCategory in practice; typed loosely because user-added events pass through here. */
   category: string
   conflict: boolean
   metadata?: string
+  /** Who is responsible for making it happen. Defaults to memberId when absent. */
+  ownerId?: string
+  backupIds?: string[]
+  recurrence?: Recurrence
+}
+
+export type ObligationCategory = 'Residency' | 'Finance' | 'School' | 'Health' | 'Home'
+
+export interface Obligation {
+  id: string
+  familyId: string
+  title: string
+  category: ObligationCategory
+  /** Key into lib/load/reference-durations. */
+  taskType: string
+  dueDate: string
+  recurrence?: Recurrence
+  ownerId: string
+  backupIds: string[]
+  /** Member the obligation concerns (whose Emirates ID, whose prescription). */
+  subjectId?: string
+  consequence: string
+  leadTimeDays: number
+  status: 'open' | 'done'
+  sourceType?: string
+  sourceId?: string
+}
+
+export type HandoffStatus = 'pending' | 'accepted' | 'declined' | 'redirected'
+export type HandoffItemType = 'obligation' | 'medication' | 'event'
+
+export interface Handoff {
+  id: string
+  familyId: string
+  fromId: string
+  toId: string
+  itemType: HandoffItemType
+  itemId: string
+  itemTitle: string
+  reason: string
+  status: HandoffStatus
+  redirectedToId?: string
+  createdAt: string
+  respondedAt?: string
 }
 
 export interface FamilyMember {
@@ -66,6 +122,9 @@ export interface FamilyMember {
 
 export interface Family {
   id: string
+  /** Surname only (e.g. "Al-Mazrouei"). Members carry given names. */
   name: string
   members: FamilyMember[]
+  obligations?: Obligation[]
+  handoffs?: Handoff[]
 }

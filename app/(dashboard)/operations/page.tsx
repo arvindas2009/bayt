@@ -1,232 +1,206 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { RefreshCw, AlertTriangle, ArrowRight, CalendarPlus } from 'lucide-react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { ArrowRight, CalendarDays, CalendarPlus, FileInput, RefreshCw, School, UtensilsCrossed } from 'lucide-react'
 import { useAgentStore } from '@/store/agent-store'
-import { useFamilyStore } from '@/store/family-store'
-import AgentStatusDot from '@/components/layout/AgentStatusDot'
-import MealPlanGrid from '@/components/operations/MealPlanGrid'
+import { isDemoMode } from '@/lib/demo/mode'
+import { usePageBusy } from '@/lib/hooks/usePageBusy'
+import { CardSkeleton } from '@/components/ui/Skeleton'
+import { CARD } from '@/components/ui/Card'
+import Tabs from '@/components/ui/Tabs'
+import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/components/ui/Button'
+import PageHeader from '@/components/layout/PageHeader'
+import PinButton from '@/components/pins/PinButton'
+import type { PinId } from '@/lib/pins/registry'
+import AddEventModal from '@/components/calendar/AddEventModal'
 import CalendarConflicts from '@/components/operations/CalendarConflicts'
+import DropInbox from '@/components/operations/DropInbox'
+import FamilyAgenda from '@/components/operations/FamilyAgenda'
+import MealPlanGrid from '@/components/operations/MealPlanGrid'
 import SchoolAdminDrafts from '@/components/operations/SchoolAdminDrafts'
 import SchoolHealthBriefs from '@/components/operations/SchoolHealthBriefs'
-import FamilyAgenda from '@/components/operations/FamilyAgenda'
-import AddEventModal from '@/components/calendar/AddEventModal'
 
-// ─── Skeletons ────────────────────────────────────────────────────────────────
-
-const PULSE = 'bg-[var(--surface-container-high)]'
-
-function MealGridSkeleton() {
+/** A tab's first line: what it is for, and the pin that puts it on the Briefing. */
+function PanelBar({ pin, children }: { pin: PinId; children: React.ReactNode }) {
   return (
-    <section
-      className="animate-pulse bg-[var(--surface-container-lowest)] p-6"
-      style={{ borderTop: '1px solid var(--outline-variant)', borderBottom: '1px solid var(--outline-variant)' }}
-    >
-      <div className="mb-5 flex items-center justify-between">
-        <div className={`h-3 w-36 ${PULSE}`} />
-        <div className={`h-3 w-28 ${PULSE}`} />
-      </div>
-      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="flex flex-col gap-2">
-            <div className={`h-3 ${PULSE}`} />
-            {Array.from({ length: 3 }).map((_, j) => (
-              <div key={j} className={`h-20 ${PULSE}`} />
-            ))}
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function ListSkeleton({ rows = 3 }: { rows?: number }) {
-  return (
-    <section
-      className="animate-pulse bg-[var(--surface-container-lowest)] p-6"
-      style={{ borderTop: '1px solid var(--outline-variant)', borderBottom: '1px solid var(--outline-variant)' }}
-    >
-      <div className={`mb-5 h-3 w-32 ${PULSE}`} />
-      <div className="space-y-5">
-        {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="space-y-2">
-            <div className={`h-3 ${PULSE}`} style={{ width: `${60 + (i % 3) * 13}%` }} />
-            <div className={`h-3 ${PULSE}`} style={{ width: `${42 + (i % 2) * 18}%` }} />
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-// ─── Error state ──────────────────────────────────────────────────────────────
-
-function ErrorState({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 p-10 text-center">
-      <div
-        className="flex size-16 items-center justify-center"
-        style={{ border: '1px solid var(--outline-variant)', background: 'var(--surface-container)' }}
-      >
-        <AlertTriangle className="size-7 text-[var(--error)]" />
-      </div>
-      <div>
-        <h2
-          className="text-2xl font-bold tracking-tight text-[var(--on-surface)]"
-          style={{ fontFamily: 'var(--font-space-grotesk)' }}
-        >
-          Agent run failed
-        </h2>
-        <p className="mt-2 font-mono text-xs uppercase tracking-widest text-[var(--on-surface-variant)]">
-          Could not reach the Operations agent — check your API key and connection.
-        </p>
-      </div>
-      <button
-        onClick={onRetry}
-        className="flex items-center gap-3 px-8 py-3 font-mono text-xs uppercase tracking-widest transition-opacity hover:opacity-80"
-        style={{ background: 'var(--primary)', color: 'var(--on-primary)' }}
-      >
-        <RefreshCw className="size-3.5" />
-        Retry
-      </button>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm text-[var(--ink-muted)]">{children}</p>
+      <PinButton id={pin} />
     </div>
   )
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+const TAB_IDS = ['calendar', 'meals', 'inbox', 'school'] as const
+type TabId = (typeof TAB_IDS)[number]
 
 export default function OperationsPage() {
-  const { agentStatuses, agentOutputs, runAgent } = useAgentStore()
-  const family = useFamilyStore((s) => s.family)
+  // useSearchParams needs a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={null}>
+      <Operations />
+    </Suspense>
+  )
+}
+
+function Operations() {
+  const { agentStatuses, agentOutputs, agentMeta, runAgent } = useAgentStore()
   const status = agentStatuses.operations
   const output = agentOutputs.operations
-  const isThinking = status === 'thinking'
-  const isPreview = Boolean(output?._mock)
+  const thinking = status === 'thinking'
   const [showAddEvent, setShowAddEvent] = useState(false)
 
+  // The tab lives in the URL (?tab=school), so a link can open the right part of the page.
+  const params = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const asked = params.get('tab')
+  const tab: TabId = TAB_IDS.includes(asked as TabId) ? (asked as TabId) : 'calendar'
+  const setTab = (id: string) => router.replace(id === 'calendar' ? pathname : `${pathname}?tab=${id}`, { scroll: false })
+
   useEffect(() => {
+    // Served from today's stored run unless it is stale, so opening the page does not call a model.
     if (!output) runAgent('operations')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  usePageBusy(!output && thinking)
 
-  if (!output && status !== 'idle') {
-    return (
-      <div className="flex flex-col">
-        <div
-          className="flex animate-pulse items-center justify-between px-10 py-3"
-          style={{ borderBottom: '1px solid var(--outline-variant)' }}
-        >
-          <div className="flex items-center gap-3">
-            <div className={`h-4 w-24 ${PULSE}`} />
-            <div className={`h-3 w-10 ${PULSE}`} />
-          </div>
-          <div className={`h-3 w-20 ${PULSE}`} />
-        </div>
-        <div className="flex flex-col gap-4 p-10">
-          <MealGridSkeleton />
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <ListSkeleton rows={3} />
-            <ListSkeleton rows={2} />
-          </div>
-        </div>
-      </div>
-    )
-  }
+  // Parts that need the agent's output wait for it; the agenda and the inbox do not.
+  const pending = !output && status !== 'idle' ? (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <CardSkeleton className="h-[260px]" />
+      <CardSkeleton className="h-[260px]" />
+    </div>
+  ) : !output ? (
+    <div className={`${CARD} flex flex-col items-start gap-3`}>
+      <p className="text-base text-[var(--ink-muted)]">
+        The week&rsquo;s plan could not be made{agentMeta.operations?.error ? `: ${agentMeta.operations.error}` : '.'}
+      </p>
+      <button onClick={() => runAgent('operations', { force: true })} className={BUTTON_SECONDARY}>
+        <RefreshCw className="size-3.5" aria-hidden />
+        Try again
+      </button>
+    </div>
+  ) : null
 
-  if (!output && status === 'idle') {
-    return <ErrorState onRetry={() => runAgent('operations')} />
-  }
+  const schoolCount = output ? output.schoolDrafts.length + (output.schoolHealthBriefs?.length ?? 0) : undefined
 
   return (
-    <div className="flex flex-col">
-      {/* Toolbar */}
-      <div
-        className="flex items-center justify-between px-10 py-3"
-        style={{ borderBottom: '1px solid var(--outline-variant)' }}
-      >
-        <div className="flex items-center gap-3">
-          <h1
-            className="text-base font-bold tracking-tight text-[var(--on-surface)]"
-            style={{ fontFamily: 'var(--font-space-grotesk)' }}
-          >
-            Operations
-          </h1>
-          <AgentStatusDot name="OPS" status={status} />
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowAddEvent(true)}
-            className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest transition-colors px-3 py-1.5"
-            style={{ background: 'var(--primary-container)', color: 'var(--on-primary-container)', border: '1px solid transparent' }}
-          >
-            <CalendarPlus className="size-3.5" />
-            Add Event
-          </button>
-          <button
-            onClick={() => runAgent('operations')}
-            disabled={isThinking}
-            className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-[var(--on-surface-variant)] transition-colors hover:text-[var(--on-surface)] disabled:opacity-40"
-          >
-            <RefreshCw className={`size-3.5 ${isThinking ? 'animate-spin' : ''}`} />
-            {isThinking ? 'Regenerating…' : 'Regenerate'}
-          </button>
-        </div>
-      </div>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-10 pb-20 pt-8">
+      <PageHeader
+        shortTitle="Operations"
+        title="Operations"
+        subtitle={<p className="text-sm text-[var(--ink-muted)]">The week&rsquo;s calendar, meals and paperwork. Pick one at a time.</p>}
+        actions={
+          <>
+            <button onClick={() => runAgent('operations', { force: true })} disabled={thinking} className={BUTTON_SECONDARY}>
+              <RefreshCw className={`size-3.5 ${thinking ? 'animate-spin' : ''}`} aria-hidden />
+              {thinking ? 'Working…' : 'Plan again'}
+            </button>
+            <button onClick={() => setShowAddEvent(true)} className={BUTTON_PRIMARY}>
+              <CalendarPlus className="size-4" aria-hidden />
+              Add event
+            </button>
+          </>
+        }
+      />
 
-      {output && isPreview && (
-        <div
-          className="px-10 py-3"
-          style={{ background: 'rgba(231,195,101,0.08)', borderBottom: '1px solid var(--outline-variant)' }}
-        >
-          <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--primary)]">
-            Preview data
-          </p>
-          <p className="mt-1 text-sm leading-relaxed text-[var(--on-surface-variant)]" style={{ fontFamily: 'var(--font-inter)' }}>
-            The live agent response was unavailable, so this screen is showing preview output instead.
-            {output._error ? ` ${output._error}` : ''}
-          </p>
-        </div>
+      {output?._mock && (
+        <p className="-mt-4 text-sm text-[var(--ink-muted)]">
+          Showing the built-in plan. The model was unavailable{output._error ? `: ${output._error}` : '.'}
+        </p>
       )}
 
-      {/* Content */}
-      <div className="flex flex-col gap-4 p-10">
-        <section
-          className="bg-[var(--surface-container-lowest)] p-6"
-          style={{ borderTop: '1px solid var(--outline-variant)', borderBottom: '1px solid var(--outline-variant)' }}
-        >
-          <header className="mb-5 flex items-center justify-between">
-            <span className="font-mono text-xs uppercase tracking-widest text-[var(--on-surface-variant)]">
-              7-Day Meal Plan
-            </span>
-            <Link
-              href="/operations/meal-plan"
-              className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-[var(--primary)] transition-opacity hover:opacity-70"
-            >
-              View full meal plan
-              <ArrowRight className="size-3" />
-            </Link>
-          </header>
-          <MealPlanGrid weeklyPlan={output!.weeklyPlan} />
-        </section>
+      <Tabs
+        label="Operations"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          {
+            id: 'calendar',
+            label: 'Calendar',
+            icon: CalendarDays,
+            count: output?.calendarConflicts.length,
+            content: (
+              <div className="flex flex-col gap-4">
+                <PanelBar pin="clashes">The next days for everyone, and anything booked twice.</PanelBar>
+                <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                  <div className={CARD}>
+                    <FamilyAgenda />
+                  </div>
+                  <div className={CARD}>{output ? <CalendarConflicts conflicts={output.calendarConflicts} /> : pending}</div>
+                </div>
+              </div>
+            ),
+          },
+          {
+            id: 'meals',
+            label: 'Meals',
+            icon: UtensilsCrossed,
+            content: output ? (
+              <div className="flex flex-col gap-4">
+              <PanelBar pin="meals-today">Seven days of meals that suit everyone, with substitutes where needed.</PanelBar>
+              <section aria-labelledby="meals-title" className={CARD}>
+                <div className="mb-5 flex items-end justify-between gap-4">
+                  <div>
+                    <h2 id="meals-title" className="font-display text-2xl text-[var(--ink)]">This week&rsquo;s meals</h2>
+                    <p className="mt-1 text-sm text-[var(--ink-muted)]">Filled dots: the dish suits that person. Hollow: they get a substitute. Open a dish for details.</p>
+                  </div>
+                  <Link
+                    href="/operations/meal-plan"
+                    className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3.5 py-1.5 text-sm text-[var(--ink)] transition-colors hover:bg-[var(--surface-raised)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--sand-text)]"
+                  >
+                    Full plan <ArrowRight className="size-3.5" aria-hidden />
+                  </Link>
+                </div>
+                <MealPlanGrid weeklyPlan={output.weeklyPlan} />
+              </section>
+              </div>
+            ) : (
+              pending
+            ),
+          },
+          {
+            id: 'inbox',
+            label: 'Drop anything',
+            icon: FileInput,
+            content: (
+              <div className="flex flex-col gap-4">
+                <PanelBar pin="drop">Drop a letter, bill or school note. You check every item before it is saved.</PanelBar>
+                <div className={CARD}>
+                  <DropInbox demo={isDemoMode} />
+                </div>
+              </div>
+            ),
+          },
+          {
+            id: 'school',
+            label: 'School',
+            icon: School,
+            count: schoolCount,
+            content: output ? (
+              <div className="flex flex-col gap-4">
+                <PanelBar pin="school">Bayt writes these. It never sends anything: copy the text and send it yourself.</PanelBar>
+                <div className="grid items-start gap-6 lg:grid-cols-2">
+                  <section aria-labelledby="drafts-title" className={CARD}>
+                    <h2 id="drafts-title" className="font-display text-2xl text-[var(--ink)]">Emails to the school</h2>
+                    <SchoolAdminDrafts drafts={output.schoolDrafts} />
+                  </section>
+                  <section aria-labelledby="briefs-title" className={CARD}>
+                    <h2 id="briefs-title" className="font-display text-2xl text-[var(--ink)]">Health notes for school</h2>
+                    <SchoolHealthBriefs briefs={output.schoolHealthBriefs ?? []} />
+                  </section>
+                </div>
+              </div>
+            ) : (
+              pending
+            ),
+          },
+        ]}
+      />
 
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-4">
-          {/* Left panel: Agenda */}
-          <FamilyAgenda />
-
-          {/* Right panel: Alerts & Drafts stacked vertically or in grid */}
-          <div className="flex flex-col gap-4">
-            <CalendarConflicts conflicts={output!.calendarConflicts} />
-            <SchoolAdminDrafts drafts={output!.schoolDrafts} />
-            <SchoolHealthBriefs
-              briefs={output!.schoolHealthBriefs ?? []}
-              members={family?.members ?? []}
-            />
-          </div>
-        </div>
-      </div>
       {showAddEvent && <AddEventModal onClose={() => setShowAddEvent(false)} />}
     </div>
   )
 }
-

@@ -5,6 +5,22 @@ import { Lock, LockOpen, ShieldAlert } from 'lucide-react'
 
 type VaultStatus = 'disabled' | 'active' | 'offline' | 'loading'
 
+const COPY: Record<Exclude<VaultStatus, 'loading'>, { label: string; body: string }> = {
+  disabled: {
+    label: 'Cloud mode',
+    body: 'Health analysis uses Gemini. Switch to the local vault to keep health data on this machine.',
+  },
+  active: {
+    label: 'Local vault active',
+    body: 'Health analysis runs on this machine. Nothing health-related is sent to the cloud.',
+  },
+  offline: {
+    label: 'Local model offline',
+    body: 'The vault is on but Ollama is not running, so health analysis is paused. It will not fall back to the cloud.',
+  },
+}
+
+/** The privacy-vault row inside the System popover: current mode, what it means, and the switch. */
 export default function PrivacyVaultBadge() {
   const [status, setStatus] = useState<VaultStatus>('loading')
   const [toggling, setToggling] = useState(false)
@@ -41,39 +57,25 @@ export default function PrivacyVaultBadge() {
 
   if (status === 'loading') return null
 
-  const active = status === 'active'
-  const disabled = status === 'disabled'
-
-  const styles = disabled
-    ? 'bg-white/5 border-white/10 text-[var(--text-disabled,#555)]'
-    : active
-      ? 'bg-emerald-950/40 border-emerald-700/50 text-emerald-400'
-      : 'bg-amber-950/40 border-amber-700/50 text-amber-400'
-
-  const Icon = disabled ? LockOpen : active ? Lock : ShieldAlert
-
-  const tooltips: Record<VaultStatus, string> = {
-    loading: '',
-    disabled: 'Privacy Vault is off — health data goes to Gemini. Click to enable local Ollama.',
-    active: 'Privacy Vault active — health AI runs locally. Click to disable.',
-    offline: 'Privacy Vault enabled but Ollama is offline. Click to disable.',
-  }
+  const Icon = status === 'disabled' ? LockOpen : status === 'active' ? Lock : ShieldAlert
+  // Cloud mode is a normal, neutral state. Ember is reserved for "vault on but the local model is down".
+  const tone = status === 'active' ? 'text-[var(--palm)]' : status === 'offline' ? 'text-[var(--ember)]' : 'text-[var(--ink-muted)]'
+  const { label, body } = COPY[status]
 
   return (
-    <button
-      onClick={toggle}
-      disabled={toggling}
-      title={tooltips[status]}
-      className={[
-        'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-widest border transition-opacity',
-        styles,
-        toggling ? 'opacity-50 cursor-wait' : 'cursor-pointer hover:opacity-80',
-      ].join(' ')}
-    >
-      <Icon className="size-3 shrink-0" aria-hidden />
-      <span>
-        {disabled ? 'Vault: Off' : active ? 'Vault: Active' : 'Vault: Offline'}
-      </span>
-    </button>
+    <div className="flex items-start gap-3">
+      <Icon className={`mt-0.5 size-4 shrink-0 ${tone}`} aria-hidden />
+      <div className="min-w-0 flex-1">
+        <p className={`text-sm font-medium ${tone}`}>{label}</p>
+        <p className="mt-0.5 text-xs leading-relaxed text-[var(--ink-muted)]">{body}</p>
+      </div>
+      <button
+        onClick={toggle}
+        disabled={toggling}
+        className="shrink-0 rounded-md border border-[var(--line-strong)] px-2.5 py-1 text-xs text-[var(--ink)] transition-colors hover:bg-[var(--surface-high)] disabled:cursor-wait disabled:opacity-50"
+      >
+        {status === 'disabled' ? 'Use local vault' : 'Use cloud'}
+      </button>
+    </div>
   )
 }

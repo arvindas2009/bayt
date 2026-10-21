@@ -1,0 +1,129 @@
+bayt/
+│
+├── app/
+│   ├── layout.tsx                    # Root layout, dark theme, fonts
+│   ├── page.tsx                      # Landing / onboarding (Salem family login)
+│   │
+│   ├── (dashboard)/
+│   │   ├── layout.tsx                # Dashboard shell (sidebar + top bar)
+│   │   ├── page.tsx                  # Family Briefing (HERO PAGE)
+│   │   │
+│   │   ├── operations/
+│   │   │   ├── page.tsx              # Ops Agent: meal planning demo
+│   │   │   └── meal-plan/
+│   │   │       └── page.tsx          # Interactive meal plan view
+│   │   │
+│   │   ├── health/
+│   │   │   ├── page.tsx              # Health Agent: family health map
+│   │   │   └── [memberId]/
+│   │   │       └── page.tsx          # Individual member health profile
+│   │   │
+│   │   ├── connection/
+│   │   │   └── page.tsx              # Connection Agent (STUB - visual only)
+│   │   │
+│   │   └── caregiver/
+│   │       └── page.tsx              # Caregiver Agent (STUB - visual only)
+│   │
+│   └── api/
+│       ├── agents/
+│       │   ├── operations/
+│       │   │   └── route.ts          # Operations Agent endpoint (REAL)
+│       │   ├── health/
+│       │   │   └── route.ts          # Health Agent endpoint (REAL)
+│       │   └── orchestrator/
+│       │       └── route.ts          # Master orchestrator (calls both agents)
+│       │
+│       └── briefing/
+│           └── route.ts              # Generates daily briefing from agent outputs
+│
+├── components/
+│   │
+│   ├── briefing/
+│   │   ├── DailyBriefing.tsx         # 30-second morning summary card
+│   │   ├── TimeDividend.tsx          # "Hours returned this week" metric
+│   │   ├── MemoryCapture.tsx         # Grandparent memory surfacing
+│   │   └── FamilyPulse.tsx           # Live status of all 4 agents
+│   │
+│   ├── agents/
+│   │   ├── OperationsPanel.tsx       # Meal plan + calendar view
+│   │   ├── HealthPanel.tsx           # Cross-family pattern detection
+│   │   ├── ConnectionPanel.tsx       # Stub: drift alerts + micro-interventions
+│   │   └── CaregiverPanel.tsx        # Stub: burnout risk gauge
+│   │
+│   ├── health/
+│   │   ├── FamilyHealthMap.tsx       # D3 network graph of family health links
+│   │   ├── MemberHealthCard.tsx      # Individual health snapshot
+│   │   ├── PatternAlert.tsx          # Cross-member pattern detected card
+│   │   └── HealthTimeline.tsx        # Recharts timeline of health events
+│   │
+│   ├── operations/
+│   │   ├── MealPlanGrid.tsx          # 7-day meal plan calendar
+│   │   ├── MealCard.tsx              # Single meal with nutritional tags
+│   │   ├── CalendarConflicts.tsx     # Detected schedule conflicts
+│   │   └── SchoolAdminDrafts.tsx     # Auto-drafted school emails
+│   │
+│   ├── connection/
+│   │   ├── RelationshipDriftCard.tsx # "9 days since real convo" alert
+│   │   ├── MicroIntervention.tsx     # Suggested action card
+│   │   └── MemoryVault.tsx           # Grandparent captured memories
+│   │
+│   ├── caregiver/
+│   │   ├── BurnoutGauge.tsx          # Visual risk indicator
+│   │   └── LoadDistribution.tsx      # Who's carrying what
+│   │
+│   ├── layout/
+│   │   ├── Sidebar.tsx               # Agent navigation
+│   │   ├── TopBar.tsx                # Family name + current date + status
+│   │   └── AgentStatusDot.tsx        # Live/stub indicator dot
+│   │
+│   └── ui/                           # shadcn generated components
+│       ├── button.tsx
+│       ├── card.tsx
+│       ├── badge.tsx
+│       ├── progress.tsx
+│       └── ...
+│
+├── lib/
+│   │
+│   ├── agents/
+│   │   ├── operations-agent.ts       # System prompt + tool definitions
+│   │   ├── health-agent.ts           # System prompt + pattern detection logic
+│   │   └── orchestrator.ts           # Calls agents, merges outputs
+│   │
+│   ├── ai/
+│   │   └── client.ts                 # Anthropic client singleton
+│   │
+│   ├── data/
+│   │   ├── mock-family.ts            # Salem-Fatima-Layla-Khalid-Aisha full dataset
+│   │   ├── mock-health.ts            # Lab results, medications, wearable data
+│   │   ├── mock-calendar.ts          # School events, conflicts, appointments
+│   │   ├── mock-meals.ts             # Dietary restrictions, preferences
+│   │   └── seed.ts                   # Populates Prisma DB with mock data
+│   │
+│   ├── db/
+│   │   └── prisma.ts                 # Prisma client singleton
+│   │
+│   └── utils/
+│       ├── time.ts                   # Date helpers, time dividend calc
+│       ├── health.ts                 # Pattern detection helpers
+│       └── cn.ts                     # clsx + tailwind-merge
+│
+├── types/
+│   ├── family.ts                     # FamilyMember, HealthProfile, etc.
+│   ├── agents.ts                     # AgentOutput, BriefingData, etc.
+│   └── meals.ts                      # MealPlan, Meal, NutritionProfile
+│
+├── store/
+│   ├── family-store.ts               # Zustand: active family data
+│   ├── agent-store.ts                # Zustand: agent states + outputs
+│   └── briefing-store.ts             # Zustand: daily briefing cache
+│
+├── prisma/
+│   ├── schema.prisma                 # DB schema
+│   └── migrations/
+│
+├── public/
+│   └── fonts/                        # Self-hosted display fonts
+│
+├── .env.local                        # ANTHROPIC_API_KEY, DATABASE_URL
+└── tailwind.config.ts

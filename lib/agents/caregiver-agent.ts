@@ -1,187 +1,183 @@
 import { z } from 'zod'
-import { nemotronNano } from '@/lib/ai/client'
+import { geminiFlash } from '@/lib/ai/client'
+import { isFaithfulNarrative } from '@/lib/ai/guards'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
+import { proposeHandoffs } from '@/lib/handoffs/propose'
+import { computeLoad } from '@/lib/load/model'
+import {
+  BASELINE_WEEKLY_HOURS,
+  BURNOUT_THRESHOLD,
+  LOAD_CATEGORY_LABELS,
+  type LoadCategory,
+} from '@/lib/load/reference-durations'
+import { getToday } from '@/lib/time/today'
 import { getCulturalContext, formatCulturalContextBlock } from '@/lib/utils/cultural-context'
+import type { AgentResult } from './runs'
 import type { Family } from '@/types'
-import type { CaregiverOutput } from '@/types/agents'
+import type { CaregiverIntervention, CaregiverOutput, HandoffProposal } from '@/types/agents'
 
-const CaregiverSchema = z.object({
-  loadDistribution: z.array(
-    z.object({
-      memberName: z.string(),
-      score: z.number().int().min(0).max(100),
-    }),
-  ),
-  atRiskMember: z
-    .object({
-      name: z.string(),
-      score: z.number().int(),
-      threshold: z.number(),
-      pointsAbove: z.number().int(),
-      daysWithoutRest: z.number().int().min(0),
-      summary: z.string(),
-    })
-    .optional(),
-  autoInterventions: z.array(
-    z.object({
-      description: z.string(),
-      type: z.enum(['personal_time', 'logistical_load', 'medical_coordination']),
-    }),
-  ),
-  loadBreakdownByCategory: z.array(
-    z.object({
-      category: z.string(),
-      // Explicit members — z.record() generates `propertyNames` which NVIDIA grammar rejects
-      scores: z.object({
-        Salem:  z.number(),
-        Fatima: z.number(),
-        Layla:  z.number(),
-        Khalid: z.number(),
-        Aisha:  z.number(),
-      }),
-    }),
-  ),
+/**
+ * Caregiver agent. The NUMBERS (hours, scores, shares, days without rest) come from the single
+ * deterministic load model; the model only writes the narrative. It is given hours per category
+ * and names, never conditions, medications or appointment titles, so nothing clinical leaves the
+ * server. Every intervention is a proposal the recipient must accept.
+ */
+
+const SummarySchema = z.object({
+  summary: z
+    .string()
+    .max(520)
+    .describe('At most 3 short sentences (under 60 words) naming the biggest sources of load. No gendered pronouns: use the name or "they".'),
 })
 
-function buildCaregiverContext(family: Family): string {
-  const today = new Date().toISOString().slice(0, 10)
+const CATEGORY_ORDER: LoadCategory[] = ['medical', 'school', 'admin', 'logistics', 'meals', 'social']
 
-  const memberLines = family.members
-    .map((m) => {
-      const conditions = m.healthProfile?.conditions?.join(', ') || 'none'
-      const riskFlags = m.healthProfile?.riskFlags?.join(', ') || 'none'
-      const meds =
-        m.medications.length > 0
-          ? m.medications.map((med) => `${med.name} ${med.dosage} ${med.frequency}`).join(', ')
-          : 'none'
-
-      const eventsByCategory = m.calendarEvents.reduce(
-        (acc, e) => {
-          acc[e.category] = (acc[e.category] ?? 0) + 1
-          return acc
-        },
-        {} as Record<string, number>,
-      )
-
-      const eventSummary =
-        Object.entries(eventsByCategory)
-          .map(([cat, count]) => `${cat}: ${count}`)
-          .join(', ') || 'none'
-
-      const medicalEvents = m.calendarEvents
-        .filter((e) => e.category === 'medical')
-        .map((e) => `    - "${e.title}" on ${e.date.slice(0, 10)}`)
-        .join('\n')
-
-      return `[${m.id}] ${m.name} — ${m.role}, age ${m.age}
-  Health conditions: ${conditions}
-  Risk flags: ${riskFlags}
-  Medications managed: ${meds}
-  Calendar density by category: ${eventSummary}${medicalEvents ? `\n  Medical appointments:\n${medicalEvents}` : ''}`
-    })
-    .join('\n\n')
-
-  const caregivers = family.members.filter((m) => m.role === 'parent')
-  const dependents = family.members.filter((m) => m.role === 'child' || m.role === 'grandparent')
-
-  return `Family: ${family.name}
-Today: ${today}
-Burnout threshold: 75/100 — scores above this require automatic intervention.
-
-Primary caregivers: ${caregivers.map((m) => `${m.name} (${m.role})`).join(', ')}
-Members requiring care: ${dependents.map((m) => `${m.name} (${m.role}, age ${m.age})`).join(', ')}
-
-=== MEMBER PROFILES & LOAD SIGNALS ===
-
-${memberLines}`
+function deterministicSummary(name: string, hours: number, share: number, days: number, top: [string, number][]): string {
+  const biggest = top.filter(([, h]) => h > 0).slice(0, 3).map(([c, h]) => `${c.toLowerCase()} (${h}h)`).join(', ')
+  return (
+    `${name} carries ${hours}h of household coordination in the next 7 days, ${share}% of the family's total. ` +
+    `${biggest ? `The biggest parts are ${biggest}. ` : ''}` +
+    `It has been ${days >= 30 ? '30+' : days} days since ${name}'s last rest block.`
+  )
 }
 
-export async function runCaregiverAgent(family: Family): Promise<CaregiverOutput> {
-  const context = buildCaregiverContext(family)
-  const culturalCtx = getCulturalContext(new Date())
-  const culturalBlock = formatCulturalContextBlock(culturalCtx)
+export async function runCaregiverAgent(
+  family: Family,
+  now: Date = getToday(),
+  options: { offline?: boolean } = {},
+): Promise<AgentResult<CaregiverOutput>> {
+  const load = computeLoad(family, now)
+  const nameOf = (id: string) => family.members.find((m) => m.id === id)?.name ?? id
 
-  console.log('[caregiver-agent] Starting — family:', family.name, '| members:', family.members.length)
-  console.log('[caregiver-agent] Context length (chars):', context.length)
+  const loadDistribution = [...load.members]
+    .sort((a, b) => b.hours - a.hours)
+    .map((m) => ({
+      memberId: m.memberId,
+      memberName: nameOf(m.memberId),
+      score: m.score,
+      hours: m.hours,
+      shareOfLoad: m.shareOfLoad,
+    }))
 
-  const startMs = Date.now()
+  // Share of each category's hours carried by each member.
+  const loadBreakdownByCategory = CATEGORY_ORDER.map((category) => {
+    const total = load.members.reduce((s, m) => s + m.byCategory[category], 0)
+    if (total <= 0) return null
+    return {
+      category: LOAD_CATEGORY_LABELS[category],
+      scores: Object.fromEntries(
+        load.members.map((m) => [nameOf(m.memberId), Math.round((m.byCategory[category] / total) * 100)]),
+      ),
+    }
+  }).filter((row): row is NonNullable<typeof row> => row !== null)
 
-  const result = await safeGenerateObject({
-    model: nemotronNano,
-    mode: 'json' as const,
-    providerOptions: {
-      openai: {
-        chat_template_kwargs: { enable_thinking: false },
-      },
-    },
-    schema: CaregiverSchema,
-    timeoutMs: 60_000,
-    fallbackTimeoutMs: 90_000,
-    system: `You are Bayt's Caregiver Agent. Your mission is to detect caregiver burnout before it happens and redistribute invisible family workload.
-
-${culturalBlock}
-
-
-You analyze who carries medical coordination, school admin, meal planning, and emotional labor in the ${family.name} family — and surface imbalances before they become crises.
-
-BURNOUT THRESHOLD: 75/100. Any primary caregiver scoring above 75 requires automatic intervention.
-
-ANALYSIS APPROACH:
-- Primary caregivers are the parents. Estimate their invisible labor from: number and age of dependents, health complexity (medications, medical appointments), calendar density, grandparent care burden on top of child-rearing.
-- Grandparents who are elderly and have health needs are dependents, not caregivers — score them 0–20.
-- Children carry small self-directed loads (school tasks, social) — score them 5–30.
-- The caregiver who manages the most medical appointments, school admin, and meal preparation will typically score highest.
-
-OUTPUT REQUIREMENTS:
-
-loadDistribution (one entry per family member, all members):
-- memberName: exact names as given.
-- score: 0–100. Reflect caregiving burden, not just busyness.
-
-atRiskMember (omit if no one exceeds 75):
-- The highest-scoring member above 75.
-- threshold: always 75.
-- pointsAbove: their score minus 75.
-- daysWithoutRest: estimate from calendar density and dependency count.
-- summary: 2–3 sentences. Name the specific tasks, the dependents, the duration driving burnout.
-
-autoInterventions (2–4, only if atRiskMember present):
-- Each intervention directly reduces the at-risk member's load.
-- type:
-  - 'personal_time': block rest time, remove optional tasks
-  - 'logistical_load': shift transport or errand to another family member
-  - 'medical_coordination': reroute a medical notification or appointment responsibility
-- description: specific and actionable — name who, what, when.
-
-loadBreakdownByCategory (exactly 5 categories: Meals, Medical, School Admin, Social, Emotional):
-- scores: each family member's contribution per category (0–100).
-- The at-risk member should score highest in most categories.
-- Use member names as keys (not IDs).`,
-    prompt: context,
-  })
-
-  const elapsedMs = Date.now() - startMs
-  console.log(`[caregiver-agent] returned in ${elapsedMs}ms | ok=${result.ok}`)
-
-  if (!result.ok) {
-    console.error('[caregiver-agent] FAILED:', result.error)
-    throw new Error(`Caregiver agent failed: ${result.error}`)
-  }
-
-  const output = result.data as CaregiverOutput
-
-  console.log(
-    '[caregiver-agent] Load distribution:',
-    output.loadDistribution.map((l) => `${l.memberName}:${l.score}`).join(', '),
+  // Open asks already waiting on someone count as if accepted, so repeated runs never stack up more
+  // requests than the family needs, and an item someone just declined is not pushed straight back.
+  const handoffs = family.handoffs ?? []
+  const pending = handoffs.filter((h) => h.status === 'pending')
+  const recentlyDeclined = new Set(
+    handoffs
+      .filter((h) => h.status === 'declined' && now.getTime() - new Date(h.respondedAt ?? h.createdAt).getTime() < 3 * 86_400_000)
+      .map((h) => h.itemId),
   )
-  if (output.atRiskMember) {
-    console.log(
-      `[caregiver-agent] At-risk: ${output.atRiskMember.name} score=${output.atRiskMember.score} (+${output.atRiskMember.pointsAbove} above threshold, ${output.atRiskMember.daysWithoutRest}d without rest)`,
-    )
-  } else {
-    console.log('[caregiver-agent] No member above burnout threshold')
-  }
-  console.log('[caregiver-agent] Auto-interventions:', output.autoInterventions.length)
+  const projected = pending.length > 0 ? computeLoad(family, now, { assumeAccepted: pending }) : load
+  const newProposals = proposeHandoffs(family, projected, now, { exclude: recentlyDeclined })
+  const openAsks: HandoffProposal[] = pending.map((h) => ({
+    itemType: h.itemType,
+    itemId: h.itemId,
+    itemTitle: h.itemTitle,
+    fromId: h.fromId,
+    toId: h.toId,
+    reason: h.reason,
+    hours: Math.round((load.items.find((i) => i.id === h.itemId)?.hours ?? 0) * 10) / 10,
+  }))
+  const proposals: HandoffProposal[] = [...openAsks, ...newProposals]
 
-  return output
+  const top = load.members.find((m) => m.memberId === load.topMemberId)
+  const atRisk = top && top.score >= BURNOUT_THRESHOLD ? top : undefined
+
+  let error: string | undefined
+  let atRiskMember: CaregiverOutput['atRiskMember']
+
+  if (atRisk) {
+    const name = nameOf(atRisk.memberId)
+    const topCategories = (Object.entries(atRisk.byCategory) as [LoadCategory, number][])
+      .sort((a, b) => b[1] - a[1])
+      .map(([c, h]) => [LOAD_CATEGORY_LABELS[c], h] as [string, number])
+
+    let summary = deterministicSummary(name, atRisk.hours, atRisk.shareOfLoad, atRisk.daysWithoutRest, topCategories)
+
+    if (!options.offline) {
+      const culturalBlock = formatCulturalContextBlock(getCulturalContext(now, family.members))
+      const facts = [
+        `Member: ${name}`,
+        `Hours of household coordination in the next 7 days: ${atRisk.hours} (typical household total is about ${BASELINE_WEEKLY_HOURS}h; this family's total is ${load.totalHours}h)`,
+        `Share of the family's total: ${atRisk.shareOfLoad}%`,
+        `Load score: ${atRisk.score}/100 (burnout line ${BURNOUT_THRESHOLD})`,
+        `Days since last rest block: ${atRisk.daysWithoutRest}`,
+        `Hours by category: ${topCategories.map(([c, h]) => `${c} ${h}`).join(', ')}`,
+      ].join('\n')
+
+      const result = await safeGenerateObject({
+        model: geminiFlash,
+        schema: SummarySchema,
+        timeoutMs: 25_000,
+        fallbackTimeoutMs: 40_000,
+        system: `You are Bayt's Caregiver Agent. Explain, kindly and concretely, why one family member's invisible workload is high. Use ONLY the facts given: do not invent tasks, conditions or feelings, and do not describe anyone else in the family. Keep it to 3 short sentences. Never use gendered pronouns; say the person's name or "they".\n\n${culturalBlock}`,
+        prompt: facts,
+      })
+      if (result.ok) {
+        const text = result.data.summary.trim()
+        // Accept the wording only if it adds no figures and makes no comparisons we did not compute.
+        if (text.length > 20 && isFaithfulNarrative(text, facts)) summary = text
+        else console.warn('[caregiver-agent] Narrative rejected (unsupported figure or comparison); using computed summary')
+      } else {
+        // The deterministic summary above is complete and accurate, so this is not a "preview".
+        console.warn('[caregiver-agent] Narrative unavailable, using computed summary:', result.error)
+        error = `Narrative: ${result.error}`
+      }
+    }
+
+    atRiskMember = {
+      memberId: atRisk.memberId,
+      name,
+      score: atRisk.score,
+      threshold: BURNOUT_THRESHOLD,
+      pointsAbove: atRisk.score - BURNOUT_THRESHOLD,
+      daysWithoutRest: atRisk.daysWithoutRest,
+      hours: atRisk.hours,
+      shareOfLoad: atRisk.shareOfLoad,
+      summary,
+    }
+  }
+
+  const interventions: CaregiverIntervention[] = proposals.map((p) => {
+    const item = load.items.find((i) => i.id === p.itemId)
+    return {
+      description: `Ask ${nameOf(p.toId)} to take "${p.itemTitle}" (about ${p.hours}h a week off ${nameOf(p.fromId)}).`,
+      type: item?.category === 'medical' ? ('medical_coordination' as const) : ('logistical_load' as const),
+      proposal: p,
+    }
+  })
+  if (atRisk && atRisk.daysWithoutRest >= 7) {
+    interventions.push({
+      description: `Block a rest slot for ${nameOf(atRisk.memberId)} this week: no tasks, no reminders.`,
+      type: 'personal_time',
+    })
+  }
+
+  return {
+    output: {
+      loadDistribution,
+      atRiskMember,
+      interventions,
+      proposals,
+      loadBreakdownByCategory,
+      totalHours: load.totalHours,
+      baselineHours: BASELINE_WEEKLY_HOURS,
+      windowStart: load.windowStart,
+    },
+    isFallback: false,
+    error,
+  }
 }

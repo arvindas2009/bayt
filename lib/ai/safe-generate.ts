@@ -3,7 +3,9 @@ import {
   type FlexibleSchema,
   type InferSchema,
 } from 'ai'
-import { nemotronNano } from './client'
+import type { z } from 'zod'
+import { fallbackModel, NVIDIA_MODEL_ID } from './client'
+import { logEnvStatusOnce } from '@/lib/env'
 
 export type SafeGenerateResult<T> =
   | { ok: true; data: T }
@@ -11,23 +13,33 @@ export type SafeGenerateResult<T> =
 
 type OutputFormat = 'object' | 'array' | 'enum' | 'no-schema'
 
+// InferSchema<> resolves to `unknown` for Zod 4 schemas, so prefer z.infer when we have one.
+type SchemaOutput<SCHEMA extends FlexibleSchema<unknown>> = SCHEMA extends z.ZodType
+  ? z.infer<SCHEMA>
+  : InferSchema<SCHEMA>
+
 type GenerateObjectResultType<
   SCHEMA extends FlexibleSchema<unknown>,
   OUTPUT extends OutputFormat,
-> = OUTPUT extends 'array' ? Array<InferSchema<SCHEMA>> : InferSchema<SCHEMA>
+> = OUTPUT extends 'array' ? Array<SchemaOutput<SCHEMA>> : SchemaOutput<SCHEMA>
 
 type GenerateObjectOptions<
   SCHEMA extends FlexibleSchema<unknown>,
   OUTPUT extends OutputFormat,
 > = Omit<Parameters<typeof generateObject<SCHEMA, OUTPUT>>[0], 'abortSignal'> & {
+  /** Re-stated so TypeScript can infer SCHEMA (inference does not see through Omit<Parameters<…>>). */
+  schema: SCHEMA
   /** Timeout for the primary model call. Default: 45s */
   timeoutMs?: number
-  /** Timeout for the Nemotron fallback call. Default: 60s */
+  /** Timeout for the fallback-provider call. Default: 60s */
   fallbackTimeoutMs?: number
-  /** Force JSON generation mode. Required for OpenAI-compatible endpoints (e.g. Nemotron) that don't support tool/function calling. */
-  mode?: 'auto' | 'json' | 'tool'
   /** Provider-specific options passed through to generateObject. */
   providerOptions?: Record<string, unknown>
+  /**
+   * Allow falling over to another (cloud) provider on rate limit / auth / overload. Default true.
+   * Set false for data that must never leave the machine (the Privacy Vault's local model).
+   */
+  failover?: boolean
 }
 
 const logTokenUsage = (
@@ -47,18 +59,23 @@ const logTokenUsage = (
   })
 }
 
-function isRateLimitError(error: unknown): boolean {
+/**
+ * Errors where a different provider can plausibly succeed: rate limits, a missing or
+ * rejected API key, and provider overload. Schema/validation failures are NOT included —
+ * the same prompt would fail the same way on the fallback.
+ */
+export function shouldFailOver(error: unknown): boolean {
+  const status = (error as { statusCode?: number } | null)?.statusCode
+  if (status === 401 || status === 403 || status === 429 || status === 503) return true
+
   const msg = error instanceof Error ? error.message : String(error)
   return (
-    msg.includes('Quota exceeded') ||
-    msg.includes('quota') ||
-    msg.includes('rate limit') ||
-    msg.includes('429') ||
-    msg.includes('RESOURCE_EXHAUSTED')
+    /\b(401|403|429|503)\b/.test(msg) ||
+    /quota|rate.?limit|RESOURCE_EXHAUSTED|UNAUTHENTICATED|PERMISSION_DENIED|overloaded/i.test(msg) ||
+    /api key (is missing|not valid)|missing api key|invalid api key/i.test(msg)
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Opts = Parameters<typeof generateObject>[0]
 
 export async function safeGenerateObject<
@@ -67,7 +84,8 @@ export async function safeGenerateObject<
 >(
   options: GenerateObjectOptions<SCHEMA, OUTPUT>,
 ): Promise<SafeGenerateResult<GenerateObjectResultType<SCHEMA, OUTPUT>>> {
-  const { timeoutMs = 45_000, fallbackTimeoutMs = 60_000, ...generateObjectOptions } = options
+  const { timeoutMs = 45_000, fallbackTimeoutMs = 60_000, failover = true, ...generateObjectOptions } = options
+  const env = logEnvStatusOnce()
 
   const primarySignal = AbortSignal.timeout(timeoutMs)
 
@@ -79,28 +97,24 @@ export async function safeGenerateObject<
     logTokenUsage('primary', result.usage)
     return { ok: true, data: result.object as GenerateObjectResultType<SCHEMA, OUTPUT> }
   } catch (primaryError) {
-    if (isRateLimitError(primaryError)) {
+    const noFallbackProvider = generateObjectOptions.model === fallbackModel || !failover
+    if (shouldFailOver(primaryError) && !noFallbackProvider && !env.hasNvidia) {
+      const message = 'Primary model unavailable and NVIDIA_API_KEY is not set, so there is no fallback provider.'
+      console.error(`[AI] ${message}`, primaryError)
+      return { ok: false, error: message }
+    }
+    if (shouldFailOver(primaryError) && !noFallbackProvider) {
       console.warn(
-        `[AI] Primary model rate-limited — falling back to Nemotron Nano 30B via NVIDIA (budget: ${fallbackTimeoutMs / 1000}s)`
+        `[AI] Primary model unavailable (rate limit, auth or overload) — falling back to ${NVIDIA_MODEL_ID} via NVIDIA (budget: ${fallbackTimeoutMs / 1000}s)`
       )
       const fallbackSignal = AbortSignal.timeout(fallbackTimeoutMs)
       try {
         const result = await generateObject({
           ...generateObjectOptions,
-          model: nemotronNano,
-          // json mode: uses response_format.type=json_object, more broadly supported
-          // than json_schema across OpenAI-compatible endpoints
-          mode: 'json',
-          // Disable thinking/reasoning — these Nemotron models default to a reasoning
-          // preamble that can add minutes of latency before the actual JSON output.
-          providerOptions: {
-            openai: {
-              chat_template_kwargs: { enable_thinking: false },
-            },
-          },
+          model: fallbackModel,
           abortSignal: fallbackSignal,
         } as Opts)
-        logTokenUsage('nemotron-nano-30b (fallback)', result.usage)
+        logTokenUsage(`${NVIDIA_MODEL_ID} (fallback)`, result.usage)
         return { ok: true, data: result.object as GenerateObjectResultType<SCHEMA, OUTPUT> }
       } catch (fallbackError) {
         const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)

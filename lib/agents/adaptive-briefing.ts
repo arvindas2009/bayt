@@ -1,163 +1,189 @@
 import { z } from 'zod'
+import { format, isSameDay } from 'date-fns'
 import { geminiFlash } from '@/lib/ai/client'
+import { arabicKeepsFacts, isFaithfulRewrite } from '@/lib/ai/guards'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
+import { isGenericPriority, priorityFor, type PriorityItem } from '@/lib/briefing/rank'
+import { toTodayPriority } from '@/lib/briefing/compose'
+import { getToday } from '@/lib/time/today'
+import type { LoadReport } from '@/lib/load/model'
 import type { Family, FamilyMember } from '@/types'
-import type { BriefingData, MemberBriefing } from '@/types/agents'
+import type { AgentName, MemberBriefing } from '@/types/agents'
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+/**
+ * Per-member briefing: the same facts, a different voice.
+ *
+ * What to say is deterministic: the member's ranked items become the candidates and "Today's
+ * Priority" is simply their top item. The model only chooses a greeting and rephrases candidates
+ * in the member's register. It is never told conditions or medication names; for health it gets
+ * "a medication reminder is due", not what the medication is.
+ */
 
-const MemberBriefingSchema = z.object({
+type Persona = { tone: MemberBriefing['tone']; voice: string; maxInsights: number }
+
+/** Persona from role, age and computed load: never from a first name. */
+function personaFor(member: FamilyMember, load: LoadReport): Persona {
+  if (member.role === 'grandparent') {
+    return {
+      tone: 'simple',
+      voice: 'Use simple, clear, warm language and reassure. Put any reminder first. Keep everything positive.',
+      maxInsights: 3,
+    }
+  }
+  if (member.role === 'child') {
+    return member.age < 13
+      ? { tone: 'simple', voice: 'Use very short, encouraging sentences a young child can read. Only talk about their own day.', maxInsights: 2 }
+      : { tone: 'friendly', voice: 'Use a friendly, peer-like tone. Focus on their schedule. Never alarming.', maxInsights: 3 }
+  }
+  const mine = load.members.find((m) => m.memberId === member.id)
+  const carriesMost = load.topMemberId === member.id && (mine?.score ?? 0) >= 50
+  return carriesMost
+    ? {
+        tone: 'supportive',
+        voice: 'Use a warm, supportive tone that acknowledges the invisible work this person carries. Lead with their load and anything that gives them time back.',
+        maxInsights: 4,
+      }
+    : { tone: 'authoritative', voice: 'Use a direct, concise, logistics-first tone. This person is busy.', maxInsights: 4 }
+}
+
+interface Candidate {
+  id: string
+  text: string
+  agent: AgentName
+  priority: number
+}
+
+function buildCandidates(
+  member: FamilyMember,
+  family: Family,
+  items: PriorityItem[],
+  now: Date,
+  connectionAction?: { text: string },
+): Candidate[] {
+  // Handoff requests live in the consent inbox, so they are not repeated as a line of text.
+  const candidates: Candidate[] = priorityFor(items, member.id)
+    .filter((item) => item.kind !== 'handoff')
+    .slice(0, 3)
+    .map((item, i) => ({
+      id: item.id,
+      text: item.action,
+      agent: (item.kind === 'handoff' || item.kind === 'burnout' ? 'caregiver' : 'operations') as AgentName,
+      priority: i + 1,
+    }))
+
+  const today = member.calendarEvents
+    .filter((e) => isSameDay(new Date(e.date), now) && new Date(e.date) >= now)
+    .slice(0, 2)
+  for (const e of today) {
+    candidates.push({ id: `event:${e.id}`, text: `Today at ${format(new Date(e.date), 'HH:mm')}: ${e.title}.`, agent: 'operations', priority: 4 })
+  }
+
+  // A reminder, not a prescription: the model is never told what the medication is.
+  const dosesOwnedBy = family.members.flatMap((m) => m.medications).filter((m) => (m.ownerId ?? m.memberId) === member.id && m.memberId === member.id)
+  if (member.role === 'grandparent' && dosesOwnedBy.length > 0) {
+    candidates.unshift({ id: 'meds', text: 'Your daily medication reminder is due today.', agent: 'health', priority: 1 })
+  }
+
+  if (connectionAction) candidates.push({ id: 'connection', text: connectionAction.text, agent: 'connection', priority: 5 })
+  return candidates
+}
+
+const BriefingWordingSchema = z.object({
   greeting: z.string().max(80),
-  insights: z
-    .array(
-      z.object({
-        text: z.string(),
-        priority: z.number().min(1).max(5),
-        agent: z.enum(['operations', 'health', 'connection', 'caregiver']),
-      }),
-    )
-    .max(4),
-  oneAction: z.string().describe('Single most important thing this member should do today'),
-  healthNudge: z
-    .string()
-    .optional()
-    .describe('Personal health note, non-alarming tone'),
-  tone: z.enum(['authoritative', 'supportive', 'friendly', 'simple']),
+  insights: z.array(z.object({ id: z.string(), text: z.string() })),
 })
 
-// ─── System prompts per member ────────────────────────────────────────────────
+/** The member's top ranked item, or the next thing on their calendar, or an honest "nothing urgent". */
+function priorityFrom(member: FamilyMember, items: PriorityItem[], now: Date): { text: string; priority: MemberBriefing['priority'] } {
+  const top = priorityFor(items, member.id)[0]
+  if (top) return { text: top.action, priority: toTodayPriority(top) }
 
-function buildSystemPrompt(member: FamilyMember): string {
-  if (member.role === 'parent' && member.name === 'Salem') {
-    return `You are briefing Salem, the family patriarch and primary decision-maker. Use an authoritative, direct tone. Emphasize logistics, health decisions (especially his diabetes management and HbA1c), and caregiver load distribution. Lead with operational priorities. Be concise — he is busy. Max 4 insights. The tone field must be "authoritative".`
+  const next = member.calendarEvents
+    .filter((e) => new Date(e.date) >= now)
+    .sort((a, b) => a.date.localeCompare(b.date))[0]
+  if (next) {
+    const when = isSameDay(new Date(next.date), now) ? `today at ${format(new Date(next.date), 'HH:mm')}` : format(new Date(next.date), "EEEE 'at' HH:mm")
+    return {
+      text: `Nothing urgent needs you. Next on your calendar: "${next.title}" ${when}.`,
+      priority: null,
+    }
   }
-
-  if (member.role === 'parent' && member.name === 'Fatima') {
-    return `You are briefing Fatima, the family's primary organizer and caregiver. Use a warm, supportive tone that acknowledges the invisible work she carries. Lead with her caregiver load and burnout risk. Highlight any protective time blocks in her day. Surface invisible hours clearly. Max 4 insights. The tone field must be "supportive".`
-  }
-
-  if (member.name === 'Layla') {
-    return `You are briefing Layla, a teenager. Use a friendly, peer-like tone. Focus only on her schedule and immediate concerns — exams, activities, social calendar. Do not mention alarming health data; if there is a health nudge keep it positive and encouraging, never alarming. Max 3 insights. The tone field must be "friendly".`
-  }
-
-  if (member.name === 'Khalid') {
-    return `You are briefing Khalid, a young child. Use the simplest possible language — short sentences, encouraging words. Only mention his day: school, activities, any fun plans. Limit to 2 insights maximum. End with one encouraging line in the oneAction field. The tone field must be "simple".`
-  }
-
-  if (member.role === 'grandparent') {
-    return `You are briefing ${member.name}, the family grandmother. Use simple, clear, warm language. Lead with medication reminders as priority 1. Include one meaningful family connection note among the insights. Keep everything positive and reassuring. Max 3 insights. The tone field must be "simple".`
-  }
-
-  return `You are briefing ${member.name}, a member of the Al-Salem family. Use a supportive, friendly tone. Provide the most relevant insights about their day. Max 4 insights.`
+  return { text: `Nothing needs you today, ${member.name}. Enjoy the time.`, priority: null }
 }
-
-// ─── Prompt context ───────────────────────────────────────────────────────────
-
-function buildUserPrompt(member: FamilyMember, baseBriefing: BriefingData, family: Family): string {
-  const today = new Date().toDateString()
-  const todayEvents = member.calendarEvents
-    .filter((e) => new Date(e.date).toDateString() === today)
-    .map((e) => e.title)
-
-  const medications = member.medications.map(
-    (m) => `${m.name} ${m.dosage} (${m.frequency})`,
-  )
-
-  const memberInsights = baseBriefing.insights
-    .filter((i) => i.text.toLowerCase().includes(member.name.toLowerCase()))
-    .map((i) => `[${i.agent}/${i.severity}] ${i.text}`)
-
-  const memberAlerts = baseBriefing.alerts
-    .filter((a) => a.memberName === member.name || a.memberId === member.id)
-    .map((a) => `[${a.severity}] ${a.text}`)
-
-  const otherMembersNames = family.members
-    .filter((m) => m.id !== member.id)
-    .map((m) => m.name)
-    .join(', ')
-
-  return [
-    `Family: ${family.name}`,
-    `Member: ${member.name}, age ${member.age}, role: ${member.role}`,
-    member.healthProfile?.conditions.length
-      ? `Health conditions: ${member.healthProfile.conditions.join(', ')}`
-      : '',
-    medications.length ? `Medications: ${medications.join('; ')}` : '',
-    todayEvents.length
-      ? `Today's calendar: ${todayEvents.join(', ')}`
-      : "No events on today's calendar",
-    `Other family members: ${otherMembersNames}`,
-    '',
-    `Today's family briefing summary: ${baseBriefing.summary}`,
-    '',
-    memberInsights.length
-      ? `Insights directly relevant to ${member.name}:\n${memberInsights.join('\n')}`
-      : `No specific insights flagged for ${member.name} in today's family briefing.`,
-    memberAlerts.length
-      ? `Active alerts for ${member.name}:\n${memberAlerts.join('\n')}`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-// ─── Fallback ─────────────────────────────────────────────────────────────────
-
-function buildFallback(member: FamilyMember, baseBriefing: BriefingData): MemberBriefing {
-  const tone: MemberBriefing['tone'] =
-    member.role === 'grandparent'
-      ? 'simple'
-      : member.name === 'Salem'
-        ? 'authoritative'
-        : member.name === 'Fatima'
-          ? 'supportive'
-          : member.role === 'child'
-            ? member.age < 13
-              ? 'simple'
-              : 'friendly'
-            : 'friendly'
-
-  return {
-    memberId: member.id,
-    date: new Date().toISOString(),
-    greeting: `Good morning, ${member.name}.`,
-    insights: baseBriefing.insights.slice(0, 2).map((i, idx) => ({
-      text: i.text,
-      priority: idx + 1,
-      agent: i.agent,
-    })),
-    oneAction: "Review your schedule and check in with the family.",
-    tone,
-  }
-}
-
-// ─── Export ───────────────────────────────────────────────────────────────────
 
 export async function generateMemberBriefing(
   member: FamilyMember,
-  baseBriefing: BriefingData,
   family: Family,
+  context: { load: LoadReport; items: PriorityItem[]; connectionAction?: { text: string } },
+  options: { offline?: boolean; now?: Date } = {},
 ): Promise<MemberBriefing> {
+  const now = options.now ?? getToday()
+  const persona = personaFor(member, context.load)
+  const { text: oneAction, priority } = priorityFrom(member, context.items, now)
+  const candidates = buildCandidates(member, family, context.items, now, context.connectionAction).slice(0, persona.maxInsights)
+
+  const base: MemberBriefing = {
+    memberId: member.id,
+    date: now.toISOString(),
+    greeting: `Good morning, ${member.name}.`,
+    insights: candidates.map((c) => ({ text: c.text, priority: c.priority, agent: c.agent })),
+    oneAction,
+    priority,
+    tone: persona.tone,
+  }
+
+  // Specific by construction, but guard against a generic string ever reaching the top slot.
+  if (isGenericPriority(base.oneAction)) base.oneAction = `Nothing urgent needs you today, ${member.name}.`
+
+  if (options.offline || candidates.length === 0) return base
+
   const result = await safeGenerateObject({
     model: geminiFlash,
-    schema: MemberBriefingSchema,
-    system: buildSystemPrompt(member),
-    prompt: buildUserPrompt(member, baseBriefing, family),
+    schema: BriefingWordingSchema,
+    timeoutMs: 25_000,
+    fallbackTimeoutMs: 40_000,
+    system: `You are briefing ${member.name} (${member.role}, age ${member.age}) in the ${family.name} family. ${persona.voice}
+Only rephrase the items you are given, keeping each one a short statement or instruction. Do NOT add facts or details, do not narrate or imagine scenes, do not describe anything as already happening, and do not change any name, number or time or mention health conditions. Never use gendered pronouns. Return a greeting under 80 characters.`,
+    prompt: `Rewrite each item for ${member.name}:\n${candidates.map((c) => `- id ${c.id}: ${c.text}`).join('\n')}`,
   })
 
   if (!result.ok) {
-    console.warn(`[adaptive-briefing] Generation failed for ${member.name}: ${result.error}`)
-    return buildFallback(member, baseBriefing)
+    console.warn(`[adaptive-briefing] Wording unavailable for ${member.name}: ${result.error}`)
+    return base
   }
 
-  const data = result.data as z.infer<typeof MemberBriefingSchema>
-  return {
-    memberId: member.id,
-    date: new Date().toISOString(),
-    greeting: data.greeting,
-    insights: data.insights,
-    oneAction: data.oneAction,
-    healthNudge: data.healthNudge,
-    tone: data.tone,
+  const rewritten = new Map(result.data.insights.map((i) => [i.id, i.text.trim()]))
+
+  const wordedBase: MemberBriefing = {
+    ...base,
+    greeting: result.data.greeting.trim() || base.greeting,
+    insights: candidates.map((c) => {
+      const text = rewritten.get(c.id)
+      return { text: text && isFaithfulRewrite(c.text, text) ? text : c.text, priority: c.priority, agent: c.agent }
+    }),
   }
+
+  if (member.role !== 'grandparent') return wordedBase
+  return { ...wordedBase, textAr: await arabicReadAloud(wordedBase, member) }
+}
+
+const ArabicSchema = z.object({ textAr: z.string().max(600) })
+
+/**
+ * Arabic text for the speech synthesiser: the greeting and today's priority, translated, not
+ * extended. Dropped (so the button simply hides) if the figures differ from the English source.
+ */
+async function arabicReadAloud(briefing: MemberBriefing, member: FamilyMember): Promise<string | undefined> {
+  const source = `${briefing.greeting} ${briefing.oneAction}`
+  const result = await safeGenerateObject({
+    model: geminiFlash,
+    schema: ArabicSchema,
+    timeoutMs: 20_000,
+    fallbackTimeoutMs: 30_000,
+    system: `Translate the text into simple, warm Modern Standard Arabic for reading aloud to ${member.name}. Translate only what is given: add nothing, drop nothing, and keep every name and number exactly. Never use gendered pronouns for anyone other than the listener. Return only the translation.`,
+    prompt: source,
+  })
+  if (!result.ok) return undefined
+  const textAr = result.data.textAr.trim()
+  return textAr && arabicKeepsFacts(source, textAr) ? textAr : undefined
 }

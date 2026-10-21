@@ -7,19 +7,23 @@ datasource db {
 }
 
 model Family {
-  id        String   @id @default(cuid())
-  name      String
-  members   FamilyMember[]
-  briefings Briefing[]
-  mealPlans MealPlan[]
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  name        String   // surname only, e.g. "Al-Mazrouei"
+  members     FamilyMember[]
+  briefings   Briefing[]
+  mealPlans   MealPlan[]
+  obligations Obligation[]
+  handoffs    Handoff[]
+  agentRuns   AgentRun[]
+  memories    Memory[]
+  createdAt   DateTime @default(now())
 }
 
 model FamilyMember {
   id              String   @id @default(cuid())
   familyId        String
   family          Family   @relation(fields: [familyId], references: [id])
-  name            String
+  name            String   // given name only; the surname lives on Family
   role            String   // parent | child | grandparent
   age             Int
   avatarSeed      String
@@ -28,6 +32,9 @@ model FamilyMember {
   healthProfile   HealthProfile?
   medications     Medication[]
   calendarEvents  CalendarEvent[]
+  obligations     Obligation[]   @relation("ObligationOwner")
+  handoffsOut     Handoff[]      @relation("HandoffFrom")
+  handoffsIn      Handoff[]      @relation("HandoffTo")
 }
 
 model HealthProfile {
@@ -48,6 +55,8 @@ model Medication {
   dosage       String
   frequency    String
   interactions String       // JSON
+  ownerId      String?      // who administers / refills it (defaults to the patient)
+  backupIds    String       @default("[]") // JSON array of member ids able to cover
 }
 
 model CalendarEvent {
@@ -59,6 +68,9 @@ model CalendarEvent {
   category  String
   conflict  Boolean      @default(false)
   metadata  String?      // JSON
+  ownerId   String?      // who is responsible for making it happen (defaults to memberId)
+  backupIds String       @default("[]") // JSON array of member ids able to cover
+  recurrence String?     // daily | weekly | monthly | yearly | null
 }
 
 model MealPlan {
@@ -90,4 +102,73 @@ model Briefing {
   healthOutput String   // JSON
   timeSaved    Float
   alerts       String   // JSON
+  isFallback   Boolean  @default(false) // true when composed without the LLM
+}
+
+model Obligation {
+  id          String       @id @default(cuid())
+  familyId    String
+  family      Family       @relation(fields: [familyId], references: [id])
+  title       String
+  category    String       // Residency | Finance | School | Health | Home
+  taskType    String       // key into lib/load/reference-durations (renewal, bill, refill, form, ...)
+  dueDate     DateTime
+  recurrence  String?      // weekly | monthly | quarterly | yearly | null
+  ownerId     String
+  owner       FamilyMember @relation("ObligationOwner", fields: [ownerId], references: [id])
+  backupIds   String       @default("[]") // JSON array of member ids able to cover
+  subjectId   String?      // member the obligation is about (e.g. whose Emirates ID)
+  consequence String       // what happens if it is missed
+  leadTimeDays Int         @default(7)
+  status      String       @default("open") // open | done
+  sourceType  String?      // seed | inbox | manual
+  sourceId    String?
+  createdAt   DateTime     @default(now())
+}
+
+model Handoff {
+  id          String       @id @default(cuid())
+  familyId    String
+  family      Family       @relation(fields: [familyId], references: [id])
+  fromId      String
+  from        FamilyMember @relation("HandoffFrom", fields: [fromId], references: [id])
+  toId        String
+  to          FamilyMember @relation("HandoffTo", fields: [toId], references: [id])
+  itemType    String       // obligation | medication | event
+  itemId      String
+  itemTitle   String       // denormalised so the inbox renders without a join
+  reason      String
+  status      String       @default("pending") // pending | accepted | declined | redirected
+  redirectedToId String?
+  createdAt   DateTime     @default(now())
+  respondedAt DateTime?
+}
+
+model AgentRun {
+  id         String   @id @default(cuid())
+  familyId   String
+  family     Family   @relation(fields: [familyId], references: [id])
+  agent      String   // operations | health | connection | caregiver
+  output     String   // JSON
+  isFallback Boolean  @default(false)
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([familyId, agent, createdAt])
+}
+
+model Memory {
+  id         String   @id @default(cuid())
+  familyId   String
+  family     Family   @relation(fields: [familyId], references: [id])
+  quote      String
+  attribution String  // member id of whoever said / captured it
+  role       String   // display role at capture time, e.g. "Grandmother"
+  source     String   @default("captured") // captured | sample
+  capturedAt DateTime @default(now())
+}
+
+model Setting {
+  key   String @id
+  value String
 }

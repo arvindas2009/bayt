@@ -1,4 +1,14 @@
-import { mockCalendarEvents, mockFamily, mockHealthProfiles, mockMedications } from './mock-family'
+import { format } from 'date-fns'
+import {
+  buildCalendarEvents,
+  buildMemories,
+  buildObligations,
+  mockFamily,
+  mockHealthProfiles,
+  mockMedications,
+} from './mock-family'
+import { getStartOfToday } from '../time/today'
+import { SEED_ANCHOR_KEY } from './seed-constants'
 
 process.env.DATABASE_URL ??= 'file:./dev.db'
 
@@ -6,9 +16,19 @@ const stringify = <T>(value: T) => JSON.stringify(value)
 
 async function main() {
   const { default: prisma } = await import('../db/prisma')
+  const today = getStartOfToday()
+
+  const events = buildCalendarEvents(today)
+  const obligations = buildObligations(today)
+  const memories = buildMemories(today)
 
   try {
     await prisma.$transaction(async (tx) => {
+      // Children before parents.
+      await tx.handoff.deleteMany()
+      await tx.obligation.deleteMany()
+      await tx.memory.deleteMany()
+      await tx.agentRun.deleteMany()
       await tx.meal.deleteMany()
       await tx.mealPlan.deleteMany()
       await tx.briefing.deleteMany()
@@ -17,13 +37,9 @@ async function main() {
       await tx.healthProfile.deleteMany()
       await tx.familyMember.deleteMany()
       await tx.family.deleteMany()
+      await tx.setting.deleteMany({ where: { key: SEED_ANCHOR_KEY } })
 
-      await tx.family.create({
-        data: {
-          id: mockFamily.id,
-          name: mockFamily.name,
-        },
-      })
+      await tx.family.create({ data: { id: mockFamily.id, name: mockFamily.name } })
 
       await tx.familyMember.createMany({
         data: mockFamily.members.map((member) => ({
@@ -34,6 +50,7 @@ async function main() {
           age: member.age,
           avatarSeed: member.avatarSeed,
           dietaryNeeds: stringify(member.dietaryNeeds),
+          preferences: member.preferences ? stringify(member.preferences) : null,
         })),
       })
 
@@ -55,25 +72,65 @@ async function main() {
           dosage: medication.dosage,
           frequency: medication.frequency,
           interactions: stringify(medication.interactions),
+          ownerId: medication.ownerId ?? medication.memberId,
+          backupIds: stringify(medication.backupIds ?? []),
         })),
       })
 
       await tx.calendarEvent.createMany({
-        data: mockCalendarEvents.map((event) => ({
+        data: events.map((event) => ({
           id: event.id,
           memberId: event.memberId,
           title: event.title,
           date: new Date(event.date),
-          category: event.category,
+          category: event.category.toLowerCase(),
           conflict: event.conflict,
           metadata: event.metadata ? stringify(event.metadata) : null,
+          ownerId: event.ownerId ?? null,
+          backupIds: stringify(event.backupIds ?? []),
+          recurrence: event.recurrence ?? null,
         })),
       })
+
+      await tx.obligation.createMany({
+        data: obligations.map((o) => ({
+          id: o.id,
+          familyId: o.familyId,
+          title: o.title,
+          category: o.category,
+          taskType: o.taskType,
+          dueDate: new Date(o.dueDate),
+          recurrence: o.recurrence ?? null,
+          ownerId: o.ownerId,
+          backupIds: stringify(o.backupIds),
+          subjectId: o.subjectId ?? null,
+          consequence: o.consequence,
+          leadTimeDays: o.leadTimeDays,
+          status: o.status,
+          sourceType: o.sourceType ?? 'seed',
+        })),
+      })
+
+      await tx.memory.createMany({
+        data: memories.map((m) => ({
+          id: m.id,
+          familyId: mockFamily.id,
+          quote: m.quote,
+          attribution: m.attribution,
+          role: m.role,
+          source: 'sample',
+          capturedAt: new Date(m.capturedAt),
+        })),
+      })
+
+      await tx.setting.create({ data: { key: SEED_ANCHOR_KEY, value: format(today, 'yyyy-MM-dd') } })
     })
 
-    const conflictCount = mockCalendarEvents.filter((event) => event.conflict).length
+    const conflictCount = events.filter((event) => event.conflict).length
     console.log(
-      `Seeded ${mockFamily.members.length} members, ${mockMedications.length} medications, ${mockCalendarEvents.length} events, ${conflictCount} conflicts`,
+      `Seeded ${mockFamily.members.length} members, ${mockMedications.length} medications, ${events.length} events ` +
+        `(${conflictCount} flagged conflicts), ${obligations.length} obligations, ${memories.length} sample memories ` +
+        `anchored to ${format(today, 'yyyy-MM-dd')}`,
     )
   } finally {
     await prisma.$disconnect()

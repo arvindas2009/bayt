@@ -1,37 +1,14 @@
 import { z } from 'zod'
-import type { LanguageModelV1 } from 'ai'
+import type { LanguageModel } from 'ai'
 import { geminiFlash } from '@/lib/ai/client'
 import { ollamaHealth, isPrivacyVaultEnabled, checkOllamaAvailable } from '@/lib/ai/ollama'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
+import { buildLocalHealthOutput } from '@/lib/health/patterns'
+import { getToday } from '@/lib/time/today'
 import { getCulturalContext, formatCulturalContextBlock } from '@/lib/utils/cultural-context'
+import type { AgentResult } from './runs'
 import type { Family, FamilyMember } from '@/types'
 import type { HealthOutput } from '@/types/agents'
-
-const HealthTwinSchema = z.object({
-  twins: z.array(
-    z.object({
-      memberId: z.string(),
-      currentTrajectory: z.array(
-        z.object({
-          year: z.number(),
-          riskScore: z.number().min(0).max(100),
-          dominantRisk: z.string(),
-        }),
-      ),
-      projectedTrajectory: z.array(
-        z.object({
-          year: z.number(),
-          riskScore: z.number().min(0).max(100),
-          dominantRisk: z.string(),
-        }),
-      ),
-      geneticRiskFactors: z.array(z.string()),
-      interventionsApplied: z.array(z.string()),
-      relatedAncestorId: z.string().optional(),
-      relatedAncestorPattern: z.string().optional(),
-    }),
-  ),
-})
 
 const HealthSchema = z.object({
   familyPatterns: z.array(
@@ -51,14 +28,6 @@ const HealthSchema = z.object({
       overallStatus: z.enum(['good', 'monitor', 'alert']),
       topFlags: z.array(z.string()).max(3),
       keyMetrics: z.array(z.object({ label: z.string(), value: z.string() })),
-    }),
-  ),
-  crossLinks: z.array(
-    z.object({
-      fromMember: z.string(),
-      toMember: z.string(),
-      patternId: z.string(),
-      strength: z.number().min(0).max(1),
     }),
   ),
 })
@@ -119,58 +88,52 @@ ${memberIndex}
 ${memberBlocks}`
 }
 
-export async function runHealthAgent(family: Family): Promise<HealthOutput> {
+export async function runHealthAgent(
+  family: Family,
+  now: Date = getToday(),
+  options: { offline?: boolean } = {},
+): Promise<AgentResult<HealthOutput>> {
+  const local = () => buildLocalHealthOutput(family)
+
+  // Demo mode: the locally computed summaries are the intended output, not a degraded one.
+  if (options.offline) return { output: local(), isFallback: false }
+
   const context = buildHealthContext(family)
-  const culturalCtx = getCulturalContext(new Date())
+  const culturalCtx = getCulturalContext(now, family.members)
   const culturalBlock = formatCulturalContextBlock(culturalCtx)
 
   console.log('[health-agent] Starting — family:', family.name, '| members:', family.members.length)
-  console.log('[health-agent] Context length (chars):', context.length)
-  console.log('[health-agent] Member IDs:', family.members.map((m) => `${m.id}=${m.name}`).join(', '))
 
-  const memberHealthStats = family.members.map((m) => ({
-    id: m.id,
-    name: m.name,
-    conditionCount: m.healthProfile?.conditions?.length ?? 0,
-    labCount: m.healthProfile?.lastLabResults?.length ?? 0,
-    medCount: m.medications.length,
-    riskFlagCount: m.healthProfile?.riskFlags?.length ?? 0,
-    alertLabs: m.healthProfile?.lastLabResults?.filter((l) => l.status === 'alert').map((l) => l.test) ?? [],
-    monitorLabs: m.healthProfile?.lastLabResults?.filter((l) => l.status === 'monitor').map((l) => l.test) ?? [],
-  }))
-  console.log('[health-agent] Member health stats:', JSON.stringify(memberHealthStats, null, 2))
+  // ── Privacy Vault routing (fail-closed) ──────────────────────────────────────
+  let model: LanguageModel = geminiFlash
+  let timeoutMs = 45_000
+  let failover = true
+
+  if (await isPrivacyVaultEnabled()) {
+    const up = await checkOllamaAvailable()
+    if (!up) {
+      // Never fall back to the cloud with health data. Compute locally instead.
+      console.error('[health-agent] Privacy Vault is on but Ollama is offline — computing summaries locally, nothing sent to the cloud')
+      return {
+        output: local(),
+        isFallback: true,
+        error: 'Privacy Vault is on but the local model is offline, so summaries were computed locally without AI.',
+      }
+    }
+    model = ollamaHealth
+    timeoutMs = 120_000
+    failover = false
+    console.log('[health-agent] Privacy Vault ACTIVE — routing to local Ollama, cloud failover disabled')
+  }
 
   const startMs = Date.now()
-
-  // ── Privacy Vault routing ────────────────────────────────────────────────────
-  let model: LanguageModelV1 = geminiFlash
-  let timeoutMs = 45_000
-  let mode: 'json' | undefined = undefined
-
-  if (isPrivacyVaultEnabled()) {
-    const up = await checkOllamaAvailable()
-    if (up) {
-      model = ollamaHealth
-      timeoutMs = 120_000
-      mode = 'json'
-      console.log('[health-agent] Privacy Vault ACTIVE — routing to local Ollama')
-    } else {
-      console.error('[health-agent] Privacy Vault enabled but Ollama is OFFLINE — refusing cloud fallback for sensitive health data')
-      throw new Error(
-        'Privacy Vault is enabled but Ollama is unreachable. Start Ollama or set PRIVACY_VAULT_ENABLED=false.'
-      )
-    }
-  }
-  // ────────────────────────────────────────────────────────────────────────────
-
-  const [result, twinResult] = await Promise.all([
-    safeGenerateObject({
-      model,
-      schema: HealthSchema,
-      timeoutMs,
-      fallbackTimeoutMs: 60_000,
-      ...(mode !== undefined && { mode }),
-      system: `You are Bayt's Health Agent. You think across the family unit, not the individual.
+  const result = await safeGenerateObject({
+    model,
+    schema: HealthSchema,
+    timeoutMs,
+    fallbackTimeoutMs: 60_000,
+    failover,
+    system: `You are Bayt's Health Agent. You think across the family unit, not the individual.
 
 ${culturalBlock}
 
@@ -181,113 +144,45 @@ ANALYSIS APPROACH:
 - Look for patterns that cross individuals: shared deficiencies, related chronic conditions, medications that interact if shared or if caregiving patterns overlap.
 - Think generationally: child growth issues + parent metabolic conditions + grandparent bone health often connect.
 - Do NOT just list each member's issues independently — surface the FAMILY-LEVEL patterns.
+- Only describe what the records support. Do not invent results, diagnoses, projections or percentages. You are not giving medical advice: recommend asking the relevant clinician.
 
 OUTPUT REQUIREMENTS:
 
-familyPatterns (3–5 patterns):
+familyPatterns (up to 5 patterns):
 - Each pattern MUST span at least one shared risk or linked condition across 2+ members.
-- affectedMembers: use member IDs exactly as given (e.g., mem_salem, mem_fatima).
+- affectedMembers: use member IDs exactly as given in the member ID reference.
 - severity: 'info' for informational/preventive, 'warning' for emerging risk, 'critical' for active clinical concern.
-- recommendation: concrete, actionable — specific foods, tests, schedules, referrals.
-- confidence: 0.0–1.0 based on how much data supports this pattern (lab evidence = high, lifestyle inference = lower).
-- Seed patterns to look for:
-  • Vitamin D deficiency cluster: check lab D values across members, wearable outdoor proxies (low steps), indoor lifestyle indicators.
-  • Bone health family priority: link diabetes (Salem) + osteoporosis (Aisha) + child growth markers (Khalid) into one cross-generational recommendation.
-  • Medication interaction risks: any medications across caregiving pairs that could interact if doses are mixed up.
-  • Sleep pattern cluster: compare wearable sleep hours across members — shared household disruption?
-  • Cardiovascular risk chain: hypertension, diabetes, sedentary signals — which members share this trajectory?
+- recommendation: concrete and cautious: foods, tests to ask about, who to talk to.
+- confidence: 0.0–1.0 based on how much data supports the pattern (lab evidence = high, lifestyle inference = lower).
+- Examples of patterns to look for, only if the data supports them: the same lab out of range for several members, linked metabolic or bone-health risks across generations, medications that could be mixed up between people who share care, shared sleep disruption, a shared cardiovascular risk chain.
 
 memberSummaries (one per member):
-- overallStatus: 'good' / 'monitor' / 'alert' — based on lab statuses and risk flags.
-- topFlags: up to 3 most clinically significant issues for this member (specific, not generic).
-- keyMetrics: 3–5 key data points as [{label, value}] objects (e.g., {label: "Vitamin D", value: "18 ng/mL (insufficient)"}, {label: "HbA1c", value: "7.1%"}).
+- overallStatus: 'good' / 'monitor' / 'alert' based on lab statuses and risk flags.
+- topFlags: up to 3 most significant issues for this member (specific, not generic).
+- keyMetrics: 3–5 data points as [{label, value}] taken from the records.
 
-crossLinks (edges for the FamilyHealthMap graph):
-- One crossLink per (member pair) × (shared pattern).
-- strength: 0.0–1.0 — how strongly do they share this pattern? (Both have lab-confirmed deficiency = 0.9, one has risk flag only = 0.5).
-- Use member IDs exactly.
+Be specific. Reference actual values from the data.`,
+    prompt: context,
+  })
 
-Be specific and clinical. Reference actual lab values and conditions from the data. Do not invent data not present in the context.`,
-      prompt: context,
-    }),
-    safeGenerateObject({
-      model,
-      schema: HealthTwinSchema,
-      timeoutMs,
-      fallbackTimeoutMs: 60_000,
-      ...(mode !== undefined && { mode }),
-      system: `You are Bayt's Health Twin Projector. You generate generational health projections for family members.
-
-${culturalBlock}
-
-
-TASK: For each family member where a clear cross-generational ancestor link exists, project their health trajectory over the next 15 years in 3-year increments.
-
-CURRENT YEAR: 2026. Generate data points for years: 2026, 2029, 2032, 2035, 2038, 2041.
-
-PROJECTION RULES:
-- For each adult and teenage member, project health trajectory only when ancestor data exists.
-- Cross-reference their data against older family members who share genetic lineage.
-- For Salem (45, T2D): his mother Aisha (71) has hypertension and osteoporosis — Salem's cardiovascular risk scores should reflect this family trajectory. relatedAncestorId = Aisha's member ID.
-- For Khalid (12): his father Salem has T2D — flag early metabolic markers now, project insulin resistance risk. relatedAncestorId = Salem's member ID.
-- For Layla (16): her mother Fatima has iron deficiency and anxiety — flag same pattern emerging. relatedAncestorId = Fatima's member ID.
-- Generate ONLY for members where ancestor data exists — skip Fatima and Aisha unless a clear cross-generational link to a member in this family exists.
-- interventionsApplied should list changes the Operations Agent has ALREADY made silently (e.g., "Added omega-3 supplement to weekly meal plan", "Scheduled Saturday morning walks", "Reduced processed sugar in weekly meal plan").
-
-RISK SCORE GUIDANCE:
-- riskScore: 0 = perfect health, 100 = critical risk.
-- currentTrajectory: baseline trajectory without interventions (extrapolated from current conditions and ancestor history).
-- projectedTrajectory: improved trajectory WITH the interventions already applied by the Operations Agent (should diverge positively from current trajectory, showing the benefit of interventions).
-- Both trajectories start at the same 2026 riskScore (current state), then diverge from 2029 onwards.
-- dominantRisk: the primary health concern driving the risk score at that year point.
-
-Use the member IDs exactly as given in the context.`,
-      prompt: context,
-    }),
-  ])
-
-  const elapsedMs = Date.now() - startMs
-  console.log(`[health-agent] Both calls returned in ${elapsedMs}ms | main ok=${result.ok} | twins ok=${twinResult.ok}`)
+  console.log(`[health-agent] returned in ${Date.now() - startMs}ms | ok=${result.ok}`)
 
   if (!result.ok) {
-    console.error('[health-agent] FAILED:', result.error)
-    throw new Error(`Health agent failed: ${result.error}`)
+    console.error('[health-agent] FAILED, using locally computed summaries:', result.error)
+    return { output: local(), isFallback: true, error: result.error }
   }
 
-  const output = result.data as HealthOutput
-
-  console.log('[health-agent] Patterns detected:', output.familyPatterns.length)
-  output.familyPatterns.forEach((p) => {
-    console.log(
-      `[health-agent]   pattern="${p.title}" severity=${p.severity} confidence=${p.confidence.toFixed(2)} members=[${p.affectedMembers.join(', ')}]`,
-    )
-  })
-  console.log('[health-agent] Member summaries:', output.memberSummaries.length)
-  output.memberSummaries.forEach((s) => {
-    console.log(
-      `[health-agent]   member=${s.memberId} status=${s.overallStatus} flags=[${s.topFlags.join('; ')}]`,
-    )
-  })
-  console.log('[health-agent] Cross-links:', output.crossLinks.length)
-  output.crossLinks.forEach((c) => {
-    console.log(
-      `[health-agent]   ${c.fromMember} ↔ ${c.toMember} via pattern=${c.patternId} strength=${c.strength.toFixed(2)}`,
-    )
-  })
-
-  if (twinResult.ok) {
-    const twins = twinResult.data.twins
-    console.log('[health-agent] Health twins generated:', twins.length)
-    twins.forEach((t) => {
-      console.log(
-        `[health-agent]   twin=${t.memberId} ancestor=${t.relatedAncestorId ?? 'none'} riskFactors=${t.geneticRiskFactors.length}`,
-      )
-    })
-    output.healthTwins = twins
-  } else {
-    console.warn('[health-agent] Twin generation failed (non-fatal):', twinResult.error)
-    output.healthTwins = []
+  // Drop anything that points at a member id that does not exist.
+  const known = new Set(family.members.map((m) => m.id))
+  const output = result.data as Omit<HealthOutput, 'crossLinks'>
+  return {
+    output: {
+      familyPatterns: output.familyPatterns
+        .map((p) => ({ ...p, affectedMembers: p.affectedMembers.filter((id) => known.has(id)) }))
+        .filter((p) => p.affectedMembers.length > 0),
+      memberSummaries: output.memberSummaries.filter((s) => known.has(s.memberId)),
+      crossLinks: [],
+    },
+    isFallback: false,
   }
-
-  return output
 }

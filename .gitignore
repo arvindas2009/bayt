@@ -14,7 +14,7 @@
 /coverage
 
 # next.js
-/.next/
+/.next*/
 /out/
 
 # production
@@ -39,3 +39,19 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# env files (keep the example)
+.env
+.env.*
+!.env.local.example
+
+# local database
+*.db
+*.db-journal
+
+# MCP config can hold API keys
+.mcp.json
+
+# scratch output
+tsc-out.txt
+/.next-build/

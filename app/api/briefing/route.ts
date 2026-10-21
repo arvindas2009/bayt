@@ -1,136 +1,90 @@
-import { NextResponse } from 'next/server';
-import { getFamilyWithEverything } from '@/lib/db/queries';
-import prisma from '@/lib/db/prisma';
-import { isDemoMode, demoBriefing } from '@/lib/demo/mode';
-import { calculateInvisibleHours } from '@/lib/utils/invisible-hours';
-import { calculateMoodScore } from '@/lib/utils/mood-score';
-import type { HealthOutput, StressWindow, DriftAlert } from '@/types/agents';
+import { NextResponse } from 'next/server'
+import { ensureFreshSeed } from '@/lib/data/refresh'
+import { getFamilyWithEverything, getMemories } from '@/lib/db/queries'
+import prisma from '@/lib/db/prisma'
+import { isDemoMode } from '@/lib/demo/mode'
+import { runOrchestrator } from '@/lib/agents/orchestrator'
+import { buildPriorityItems } from '@/lib/briefing/rank'
+import { toTodayPriority } from '@/lib/briefing/compose'
+import { computeLoad } from '@/lib/load/model'
+import { getToday } from '@/lib/time/today'
+import { getDayOfYear, isSameDay } from 'date-fns'
+import type { BriefingData } from '@/types/agents'
+import type { Family } from '@/types/family'
 
-// ─── Mood score inputs (derived from Al-Salem family context) ─────────────────
+/**
+ * A memory captured today is shown today; otherwise the vault rotates by day. Read live so a
+ * memory someone just added appears without regenerating the briefing. Quotes are only ever
+ * stored text, never model output.
+ */
+async function pickMemoryOfTheDay(
+  family: Family,
+  now: Date,
+  stored: BriefingData['memoryOfTheDay'],
+): Promise<BriefingData['memoryOfTheDay']> {
+  const memories = await getMemories(family.id)
+  if (memories.length === 0) return stored
+  const todays = memories.find((m) => m.source === 'captured' && isSameDay(new Date(m.capturedAt), now))
+  const pick = todays ?? memories[getDayOfYear(now) % memories.length]
+  return {
+    quote: pick.quote,
+    attribution: family.members.find((m) => m.id === pick.attribution)?.name ?? pick.role,
+    dateCaptured: pick.capturedAt,
+  }
+}
 
-const MOCK_HEALTH_FOR_MOOD: HealthOutput = {
-  familyPatterns: [],
-  memberSummaries: [
-    { memberId: 'mem_salem',  overallStatus: 'monitor', topFlags: [], keyMetrics: [] },
-    { memberId: 'mem_fatima', overallStatus: 'monitor', topFlags: [], keyMetrics: [] },
-    { memberId: 'mem_layla',  overallStatus: 'good',    topFlags: [], keyMetrics: [] },
-    { memberId: 'mem_khalid', overallStatus: 'good',    topFlags: [], keyMetrics: [] },
-    { memberId: 'mem_aisha',  overallStatus: 'alert',   topFlags: [], keyMetrics: [] },
-  ],
-  crossLinks: [],
-};
-
-const MOCK_STRESS_FORECAST: StressWindow[] = [
-  { date: '2026-05-10', risk: 'elevated' },
-  { date: '2026-05-11', risk: 'high'     },
-  { date: '2026-05-12', risk: 'elevated' },
-  { date: '2026-05-13', risk: 'clear'    },
-  { date: '2026-05-14', risk: 'clear'    },
-  { date: '2026-05-15', risk: 'elevated' },
-  { date: '2026-05-16', risk: 'clear'    },
-];
-
-const MOCK_DRIFT_ALERTS: DriftAlert[] = [
-  { severity: 'moderate' },
-  { severity: 'minor'    },
-];
-
-// ─── Fallback Working Briefing ────────────────────────────────────────────────
-const FALLBACK_MOCK_BRIEFING = {
-  date: new Date().toISOString(),
-  summary:
-    'Three operational conflicts flagged today. Two health patterns require attention across Salem and Fatima. Caregiver load remains skewed — Fatima is absorbing 72% of logistics duties.',
-  timeSavedHours: 4.2,
-  dailyBreakdown: [
-    { day: 'Mon', hours: 1.2 },
-    { day: 'Tue', hours: 2.0 },
-    { day: 'Wed', hours: 0.8 },
-    { day: 'Thu', hours: 3.2 },
-    { day: 'Fri', hours: 4.2 },
-    { day: 'Sat', hours: 0.5 },
-    { day: 'Sun', hours: 0.0 },
-  ],
-  memoryOfTheDay: {
-    quote:
-      "Salem used to climb the lemon tree behind our old house in Al Ain. He fell once, broke his wrist, and refused to cry. Khalid has that same stubbornness.",
-    attribution: 'Aisha',
-    dateCaptured: '2026-05-07',
-  },
-  insights: [
-    {
-      id: 'ins_1',
-      agent: 'operations',
-      severity: 'warning',
-      text: "Salem's Regional Contractor Visit overlaps Khalid's Parent-Teacher Conference at 1:00 PM today. Fatima's design call ends at 12:00 — she can cover the school.",
-      timestamp: new Date().toISOString(),
-    },
-    {
-      id: 'ins_2',
-      agent: 'operations',
-      severity: 'warning',
-      text: "Aisha's physiotherapy and Fatima's dentist appointment both land at 10:00 AM on May 9. Fatima usually drives — alternative transport required.",
-      timestamp: new Date().toISOString(),
-    },
-    {
-      id: 'ins_3',
-      agent: 'health',
-      severity: 'warning',
-      text: "Layla's Vitamin D (22 ng/mL) and Fatima's (19 ng/mL) are both below threshold. Shared indoor environment likely contributing — outdoor time protocol recommended.",
-      timestamp: new Date().toISOString(),
-    },
-  ],
-  alerts: [
-    {
-      id: 'alert_1',
-      severity: 'critical',
-      text: "Khalid's EpiPen expires June 2026 — refill due within 3 weeks",
-      memberName: 'Khalid',
-      memberId: 'mem_khalid',
-      agent: 'health',
-    },
-  ],
-};
-
+/**
+ * The stored briefing carries the wording generated at compose time; everything that depends on
+ * the current state of the family (load, priority, invisible hours) is recomputed live so it never
+ * disagrees with what a handoff just changed.
+ */
 export async function GET() {
-  if (isDemoMode) {
-    return NextResponse.json(demoBriefing);
+  try {
+    await ensureFreshSeed()
+    const family = await getFamilyWithEverything()
+    if (!family) return NextResponse.json(null)
+
+    const now = getToday()
+    let row = await prisma.briefing.findFirst({ where: { familyId: family.id }, orderBy: { date: 'desc' } })
+
+    // Demo mode composes a briefing without any model, so the first visit is never empty.
+    if (isDemoMode && (!row || !isSameDay(row.date, now))) {
+      await runOrchestrator(family.id, { offline: true })
+      row = await prisma.briefing.findFirst({ where: { familyId: family.id }, orderBy: { date: 'desc' } })
+    }
+    if (!row) return NextResponse.json(null)
+
+    const fresh = (await getFamilyWithEverything(family.id)) ?? family
+    const load = computeLoad(fresh, now)
+    const items = buildPriorityItems(fresh, now, load)
+    const stored = JSON.parse(row.opsOutput) as Partial<BriefingData>
+
+    const body: BriefingData = {
+      date: row.date.toISOString(),
+      summary: row.summary,
+      insights: stored.insights ?? [],
+      timeSavedHours: row.timeSaved,
+      dailyBreakdown: stored.dailyBreakdown ?? [],
+      dividendLines: stored.dividendLines ?? [],
+      memoryOfTheDay: await pickMemoryOfTheDay(fresh, now, stored.memoryOfTheDay),
+      alerts: JSON.parse(row.alerts),
+      priority: items[0] ? toTodayPriority(items[0]) : null,
+      load: {
+        totalHours: load.totalHours,
+        windowStart: load.windowStart,
+        members: load.members.map((m) => ({
+          memberId: m.memberId,
+          hours: m.hours,
+          score: m.score,
+          shareOfLoad: m.shareOfLoad,
+          daysWithoutRest: m.daysWithoutRest,
+        })),
+      },
+      source: row.isFallback ? 'rules' : 'llm',
+    }
+    return NextResponse.json(body)
+  } catch (error) {
+    console.error('[GET /api/briefing]', error)
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Briefing failed' }, { status: 500 })
   }
-
-  const family = await getFamilyWithEverything();
-  if (!family) return NextResponse.json(null);
-
-  const briefing = await prisma.briefing.findFirst({
-    where: { familyId: family.id },
-    orderBy: { date: 'desc' },
-  });
-
-  const invisibleHours = calculateInvisibleHours(family);
-
-  const moodScore = calculateMoodScore({
-    healthOutput: MOCK_HEALTH_FOR_MOOD,
-    caregiverLoad: 78,
-    stressForecast: MOCK_STRESS_FORECAST,
-    driftAlerts: MOCK_DRIFT_ALERTS,
-    invisibleHours,
-  });
-
-  if (!briefing) {
-    return NextResponse.json({ ...FALLBACK_MOCK_BRIEFING, invisibleHours, moodScore });
-  }
-
-  // Reconstruct BriefingData from DB row
-  const opsOutput = JSON.parse(briefing.opsOutput);
-  const alerts = JSON.parse(briefing.alerts);
-
-  return NextResponse.json({
-    date: briefing.date.toISOString(),
-    summary: briefing.summary,
-    insights: opsOutput.insights,
-    timeSavedHours: briefing.timeSaved,
-    dailyBreakdown: opsOutput.dailyBreakdown,
-    memoryOfTheDay: opsOutput.memoryOfTheDay,
-    alerts,
-    invisibleHours,
-    moodScore,
-  });
 }

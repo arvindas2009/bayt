@@ -6,8 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useFamilyStore } from '@/store/family-store'
 import type { FamilyMember } from '@/types'
 
-const INPUT_CLASS = 'w-full rounded-xl px-3 py-2.5 text-sm text-[var(--on-surface)] bg-[var(--surface-container-high)] border border-[var(--outline-variant)] focus:outline-none focus:border-[var(--primary)] transition-colors'
-const LABEL_CLASS = 'font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)] mb-1.5 block'
+const INPUT_CLASS = 'w-full rounded-xl px-3 py-2.5 text-sm text-[var(--ink)] bg-[var(--surface-high)] border border-[var(--line-strong)] focus:outline-none focus:border-[var(--sand-text)] transition-colors'
+const LABEL_CLASS = 'text-xs text-[var(--ink-muted)] mb-1.5 block'
 
 interface Props {
   onClose: () => void
@@ -35,8 +35,8 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
         <button
           type="button"
           onClick={add}
-          className="px-3 py-2 font-mono text-[11px] uppercase tracking-widest transition-opacity hover:opacity-80"
-          style={{ background: 'var(--surface-container-high)', border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}
+          className="px-3 py-2 text-xs transition-opacity hover:opacity-80"
+          style={{ background: 'var(--surface-high)', border: '1px solid var(--line-strong)', color: 'var(--ink-muted)' }}
         >
           Add
         </button>
@@ -47,7 +47,7 @@ function ChipInput({ values, onChange, placeholder }: { values: string[]; onChan
             <span
               key={v}
               className="flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-[11px]"
-              style={{ background: 'var(--surface-container-highest)', color: 'var(--on-surface)', border: '1px solid var(--outline-variant)' }}
+              style={{ background: 'var(--surface-high)', color: 'var(--ink)', border: '1px solid var(--line-strong)' }}
             >
               {v}
               <button
@@ -121,7 +121,7 @@ export default function AddMemberModal({ onClose }: Props) {
     <AnimatePresence>
       <motion.div
         className="fixed inset-0 z-50 flex items-center justify-center p-6"
-        style={{ background: 'rgba(0,0,0,0.72)' }}
+        style={{ background: 'var(--scrim)' }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -130,9 +130,9 @@ export default function AddMemberModal({ onClose }: Props) {
         <motion.div
           className="relative w-full max-w-md flex flex-col"
           style={{
-            background: 'var(--surface-container-lowest)',
-            border: '1px solid var(--outline-variant)',
-            borderTop: '3px solid var(--primary)',
+            background: 'var(--bg)',
+            border: '1px solid var(--line-strong)',
+            borderTop: '3px solid var(--sand-text)',
           }}
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -140,14 +140,14 @@ export default function AddMemberModal({ onClose }: Props) {
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
+          <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid var(--line-strong)' }}>
             <div className="flex items-center gap-2.5">
-              <UserPlus className="size-4 text-[var(--primary)]" />
-              <span className="text-sm font-bold text-[var(--on-surface)]" style={{ fontFamily: 'var(--font-space-grotesk)' }}>
+              <UserPlus className="size-4 text-[var(--sand-text)]" />
+              <span className="text-sm font-bold text-[var(--ink)]" style={{ fontFamily: 'var(--font-inter)' }}>
                 Add Family Member
               </span>
             </div>
-            <button onClick={onClose} className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors">
+            <button onClick={onClose} className="text-[var(--ink-muted)] hover:text-[var(--ink)] transition-colors">
               <X className="size-4" />
             </button>
           </div>
@@ -161,7 +161,7 @@ export default function AddMemberModal({ onClose }: Props) {
                   className={INPUT_CLASS}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Omar Al-Salem"
+                  placeholder="e.g. Omar"
                   autoFocus
                 />
               </div>
@@ -202,7 +202,7 @@ export default function AddMemberModal({ onClose }: Props) {
             </div>
 
             {error && (
-              <p className="font-mono text-[11px] text-[var(--error)]">{error}</p>
+              <p className="font-mono text-[11px] text-[var(--ember)]">{error}</p>
             )}
           </div>
 
@@ -210,16 +210,16 @@ export default function AddMemberModal({ onClose }: Props) {
           <div className="flex items-center gap-3 px-6 pb-6">
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 font-mono text-[11px] uppercase tracking-widest text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors"
-              style={{ border: '1px solid var(--outline-variant)' }}
+              className="flex-1 px-4 py-2.5 text-xs text-[var(--ink-muted)] hover:text-[var(--ink)] transition-colors"
+              style={{ border: '1px solid var(--line-strong)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex-1 px-4 py-2.5 font-mono text-[11px] uppercase tracking-widest transition-opacity hover:opacity-80 disabled:opacity-40"
-              style={{ background: 'var(--primary)', color: 'var(--on-primary)' }}
+              className="flex-1 px-4 py-2.5 text-xs transition-opacity hover:opacity-80 disabled:opacity-40"
+              style={{ background: 'var(--sand)', color: 'var(--on-sand)' }}
             >
               {saving ? 'Adding…' : 'Add Member'}
             </button>

@@ -3,6 +3,10 @@ import { isPrivacyVaultEnabled, setPrivacyVaultEnabled, checkOllamaAvailable } f
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * status: 'disabled' (cloud mode), 'active' (local model running), 'offline' (vault on but the local
+ * model is unreachable: health AI is paused rather than falling back to the cloud).
+ */
 async function buildStatusResponse(enabled: boolean) {
   const ollamaOnline = enabled ? await checkOllamaAvailable() : null
   const status = !enabled ? 'disabled' : ollamaOnline ? 'active' : 'offline'
@@ -10,11 +14,11 @@ async function buildStatusResponse(enabled: boolean) {
 }
 
 export async function GET() {
-  return buildStatusResponse(isPrivacyVaultEnabled())
+  return buildStatusResponse(await isPrivacyVaultEnabled())
 }
 
 export async function POST() {
-  const next = !isPrivacyVaultEnabled()
-  setPrivacyVaultEnabled(next)
+  const next = !(await isPrivacyVaultEnabled())
+  await setPrivacyVaultEnabled(next)
   return buildStatusResponse(next)
 }

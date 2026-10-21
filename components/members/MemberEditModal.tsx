@@ -7,11 +7,12 @@ import { format, parseISO } from 'date-fns'
 import { useFamilyStore } from '@/store/family-store'
 import { useAgentStore } from '@/store/agent-store'
 import type { FamilyMember, Medication, MemberPreferences } from '@/types'
+import { getToday } from '@/lib/time/today'
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
 
-const INPUT = 'w-full rounded-xl px-3 py-2 text-sm text-[var(--on-surface)] bg-[var(--surface-container-high)] border border-[var(--outline-variant)] focus:outline-none focus:border-[var(--primary)] transition-colors'
-const LABEL = 'font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)] mb-1.5 block'
+const INPUT = 'w-full rounded-xl px-3 py-2 text-sm text-[var(--ink)] bg-[var(--surface-high)] border border-[var(--line-strong)] focus:outline-none focus:border-[var(--sand-text)] transition-colors'
+const LABEL = 'text-xs text-[var(--ink-muted)] mb-1.5 block'
 
 // ─── Chip input ───────────────────────────────────────────────────────────────
 
@@ -45,8 +46,8 @@ function ChipInput({
         <button
           type="button"
           onClick={commit}
-          className="flex items-center gap-1 px-3 py-2 font-mono text-[11px] uppercase tracking-widest transition-opacity hover:opacity-70"
-          style={{ background: 'var(--surface-container-high)', border: '1px solid var(--outline-variant)', color: 'var(--on-surface-variant)' }}
+          className="flex items-center gap-1 px-3 py-2 text-xs transition-opacity hover:opacity-70"
+          style={{ background: 'var(--surface-high)', border: '1px solid var(--line-strong)', color: 'var(--ink-muted)' }}
         >
           <Plus className="size-3" />
         </button>
@@ -57,7 +58,7 @@ function ChipInput({
             <span
               key={v}
               className="flex items-center gap-1.5 rounded-full px-3 py-1 font-mono text-[11px]"
-              style={{ background: 'var(--surface-container-highest)', color: 'var(--on-surface)', border: '1px solid var(--outline-variant)' }}
+              style={{ background: 'var(--surface-high)', color: 'var(--ink)', border: '1px solid var(--line-strong)' }}
             >
               {v}
               <button
@@ -121,7 +122,7 @@ export default function MemberEditModal({ member, onClose }: Props) {
 
   // ── Upcoming events for calendar tab ──
   const upcomingEvents = [...member.calendarEvents]
-    .filter((e) => new Date(e.date) >= new Date())
+    .filter((e) => new Date(e.date) >= getToday())
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   function updateMed(i: number, field: keyof Omit<Medication, 'id' | 'memberId'>, value: string) {
@@ -199,7 +200,7 @@ export default function MemberEditModal({ member, onClose }: Props) {
     <AnimatePresence>
       <motion.div
         className="fixed inset-0 z-50 flex items-center justify-center p-6"
-        style={{ background: 'rgba(0,0,0,0.72)' }}
+        style={{ background: 'var(--scrim)' }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -208,9 +209,9 @@ export default function MemberEditModal({ member, onClose }: Props) {
         <motion.div
           className="relative w-full max-w-2xl flex flex-col max-h-[90vh]"
           style={{
-            background: 'var(--surface-container-lowest)',
-            border: '1px solid var(--outline-variant)',
-            borderTop: '3px solid var(--primary)',
+            background: 'var(--bg)',
+            border: '1px solid var(--line-strong)',
+            borderTop: '3px solid var(--sand-text)',
           }}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -218,31 +219,31 @@ export default function MemberEditModal({ member, onClose }: Props) {
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 shrink-0" style={{ borderBottom: '1px solid var(--outline-variant)' }}>
+          <div className="flex items-center justify-between px-6 py-4 shrink-0" style={{ borderBottom: '1px solid var(--line-strong)' }}>
             <div>
-              <p className="text-base font-bold text-[var(--on-surface)]" style={{ fontFamily: 'var(--font-space-grotesk)' }}>
+              <p className="text-base font-bold text-[var(--ink)]" style={{ fontFamily: 'var(--font-inter)' }}>
                 {member.name}
               </p>
-              <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)]">
+              <p className="text-xs text-[var(--ink-muted)]">
                 Edit profile
               </p>
             </div>
-            <button onClick={onClose} className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors">
+            <button onClick={onClose} className="text-[var(--ink-muted)] hover:text-[var(--ink)] transition-colors">
               <X className="size-4" />
             </button>
           </div>
 
           {/* Tabs */}
-          <div className="flex shrink-0 px-6 pt-4 gap-1" style={{ borderBottom: '1px solid var(--outline-variant)', paddingBottom: '0' }}>
+          <div className="flex shrink-0 px-6 pt-4 gap-1" style={{ borderBottom: '1px solid var(--line-strong)', paddingBottom: '0' }}>
             {TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className="px-4 py-2 font-mono text-[11px] uppercase tracking-widest transition-colors rounded-t-lg"
+                className="px-4 py-2 text-xs transition-colors rounded-t-lg"
                 style={{
-                  background: activeTab === tab.id ? 'var(--primary-container)' : 'transparent',
-                  color: activeTab === tab.id ? 'var(--on-primary-container)' : 'var(--on-surface-variant)',
-                  borderBottom: activeTab === tab.id ? '2px solid var(--primary)' : '2px solid transparent',
+                  background: activeTab === tab.id ? 'var(--sand)' : 'transparent',
+                  color: activeTab === tab.id ? 'var(--on-sand)' : 'var(--ink-muted)',
+                  borderBottom: activeTab === tab.id ? '2px solid var(--sand-text)' : '2px solid transparent',
                 }}
               >
                 {tab.label}
@@ -300,7 +301,7 @@ export default function MemberEditModal({ member, onClose }: Props) {
                     <button
                       type="button"
                       onClick={addMed}
-                      className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--primary)] hover:opacity-70 transition-opacity"
+                      className="flex items-center gap-1.5 text-xs text-[var(--sand-text)] hover:opacity-70 transition-opacity"
                     >
                       <Plus className="size-3" />
                       Add
@@ -308,7 +309,7 @@ export default function MemberEditModal({ member, onClose }: Props) {
                   </div>
 
                   {medications.length === 0 && (
-                    <p className="text-sm text-[var(--on-surface-variant)]">No medications. Click Add to add one.</p>
+                    <p className="text-sm text-[var(--ink-muted)]">No medications. Click Add to add one.</p>
                   )}
 
                   <div className="flex flex-col gap-3">
@@ -316,7 +317,7 @@ export default function MemberEditModal({ member, onClose }: Props) {
                       <div
                         key={i}
                         className="flex gap-2 items-start p-3"
-                        style={{ background: 'var(--surface-container-high)', border: '1px solid var(--outline-variant)' }}
+                        style={{ background: 'var(--surface-high)', border: '1px solid var(--line-strong)' }}
                       >
                         <div className="flex-1 grid grid-cols-3 gap-2">
                           <input
@@ -341,7 +342,7 @@ export default function MemberEditModal({ member, onClose }: Props) {
                         <button
                           type="button"
                           onClick={() => removeMed(i)}
-                          className="text-[var(--on-surface-variant)] hover:text-[var(--error)] transition-colors mt-2.5"
+                          className="text-[var(--ink-muted)] hover:text-[var(--ember)] transition-colors mt-2.5"
                         >
                           <Trash2 className="size-3.5" />
                         </button>
@@ -385,16 +386,16 @@ export default function MemberEditModal({ member, onClose }: Props) {
             {activeTab === 'calendar' && (
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)]">
+                  <p className="text-xs text-[var(--ink-muted)]">
                     Upcoming Events ({upcomingEvents.length})
                   </p>
                 </div>
 
                 {upcomingEvents.length === 0 ? (
                   <div className="flex flex-col items-center gap-3 py-8 text-center">
-                    <Calendar className="size-8 text-[var(--on-surface-variant)] opacity-40" />
-                    <p className="text-sm text-[var(--on-surface-variant)]">No upcoming events for {member.name}.</p>
-                    <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)] opacity-60">
+                    <Calendar className="size-8 text-[var(--ink-muted)] opacity-40" />
+                    <p className="text-sm text-[var(--ink-muted)]">No upcoming events for {member.name}.</p>
+                    <p className="text-xs text-[var(--ink-muted)] opacity-60">
                       Add events from the Operations page.
                     </p>
                   </div>
@@ -404,18 +405,18 @@ export default function MemberEditModal({ member, onClose }: Props) {
                       <div
                         key={event.id}
                         className="flex items-center gap-3 px-4 py-3"
-                        style={{ background: 'var(--surface-container-high)', border: '1px solid var(--outline-variant)' }}
+                        style={{ background: 'var(--surface-high)', border: '1px solid var(--line-strong)' }}
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-[var(--on-surface)] truncate">{event.title}</p>
-                          <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                          <p className="text-sm font-medium text-[var(--ink)] truncate">{event.title}</p>
+                          <p className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--ink-muted)]">
                             {format(parseISO(event.date), 'MMM d, yyyy · HH:mm')} · {event.category}
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleDeleteEvent(event.id)}
-                          className="text-[var(--on-surface-variant)] hover:text-[var(--error)] transition-colors"
+                          className="text-[var(--ink-muted)] hover:text-[var(--ember)] transition-colors"
                         >
                           <Trash2 className="size-3.5" />
                         </button>
@@ -427,24 +428,24 @@ export default function MemberEditModal({ member, onClose }: Props) {
             )}
 
             {error && (
-              <p className="font-mono text-[11px] text-[var(--error)]">{error}</p>
+              <p className="font-mono text-[11px] text-[var(--ember)]">{error}</p>
             )}
           </div>
 
           {/* Footer */}
-          <div className="flex items-center gap-3 px-6 py-4 shrink-0" style={{ borderTop: '1px solid var(--outline-variant)' }}>
+          <div className="flex items-center gap-3 px-6 py-4 shrink-0" style={{ borderTop: '1px solid var(--line-strong)' }}>
             <button
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 font-mono text-[11px] uppercase tracking-widest text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors"
-              style={{ border: '1px solid var(--outline-variant)' }}
+              className="flex-1 px-4 py-2.5 text-xs text-[var(--ink-muted)] hover:text-[var(--ink)] transition-colors"
+              style={{ border: '1px solid var(--line-strong)' }}
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex-1 px-4 py-2.5 font-mono text-[11px] uppercase tracking-widest transition-opacity hover:opacity-80 disabled:opacity-40"
-              style={{ background: 'var(--primary)', color: 'var(--on-primary)' }}
+              className="flex-1 px-4 py-2.5 text-xs transition-opacity hover:opacity-80 disabled:opacity-40"
+              style={{ background: 'var(--sand)', color: 'var(--on-sand)' }}
             >
               {saving ? 'Saving…' : 'Save Changes'}
             </button>

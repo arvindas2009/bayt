@@ -1,161 +1,149 @@
 import { z } from 'zod'
-import { nemotronNano } from '@/lib/ai/client'
+import { format } from 'date-fns'
+import { geminiFlash } from '@/lib/ai/client'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
+import { computePairDrift, nextFreeEvening, selectDrift, DRIFT_LOOKBACK_DAYS, type PairDrift } from '@/lib/connection/drift'
+import { getMemories } from '@/lib/db/queries'
+import { getToday } from '@/lib/time/today'
 import { getCulturalContext, formatCulturalContextBlock } from '@/lib/utils/cultural-context'
-import type { Family } from '@/types'
-import type { ConnectionOutput } from '@/types/agents'
+import type { AgentResult } from './runs'
+import type { Family, FamilyMember } from '@/types'
+import type {
+  ConnectionDriftAlert,
+  ConnectionMicroAction,
+  ConnectionOutput,
+  MemoryVaultEntry,
+} from '@/types/agents'
 
-const ConnectionSchema = z.object({
-  driftAlerts: z.array(
-    z.object({
-      memberA: z.string(),
-      memberB: z.string(),
-      daysSinceContact: z.number().int().min(0),
-      severity: z.enum(['critical', 'moderate', 'minor']),
-      reason: z.string(),
-      suggestion: z.string(),
-    }),
-  ),
-  microActions: z.array(
-    z.object({
-      day: z.string(),
-      type: z.enum(['quick', 'medium', 'invest']),
-      description: z.string(),
-      membersInvolved: z.array(z.string()),
-    }),
-  ),
-  memoriesVault: z.array(
-    z.object({
-      quote: z.string(),
-      attribution: z.string(),
-      role: z.string(),
-      date: z.string(),
-    }),
-  ),
-  syncScore: z.number().int().min(0).max(100),
-})
+/**
+ * Connection agent. Evidence first: the drift list is computed from SHARED CALENDAR EVENTS
+ * (lib/connection/drift) and states only what the calendar shows. The model proposes a kind,
+ * specific nudge for each pair it is given, and may not claim anything about conversations.
+ * The Memory Vault is whatever the family actually captured; the model never writes quotes.
+ */
 
-function buildConnectionContext(family: Family): string {
-  const today = new Date().toISOString().slice(0, 10)
-
-  const memberIndex = family.members
-    .map((m) => `  ${m.id} = ${m.name} (${m.role}, age ${m.age})`)
-    .join('\n')
-
-  const memberSchedules = family.members
-    .map((m) => {
-      const events =
-        m.calendarEvents.length > 0
-          ? m.calendarEvents
-              .map((e) => `    - "${e.title}" on ${e.date.slice(0, 10)} [${e.category}]`)
-              .join('\n')
-          : '    (no upcoming events)'
-      return `[${m.id}] ${m.name} — ${m.role}, age ${m.age}
-  Calendar:
-${events}`
-    })
-    .join('\n\n')
-
-  return `Family: ${family.name}
-Today: ${today}
-
-Member ID reference:
-${memberIndex}
-
-=== MEMBER SCHEDULES ===
-
-${memberSchedules}`
+const severityFor = (days: number | null): ConnectionDriftAlert['severity'] => {
+  const d = days ?? DRIFT_LOOKBACK_DAYS
+  return d >= 14 ? 'critical' : d >= 10 ? 'moderate' : 'minor'
 }
 
-export async function runConnectionAgent(family: Family): Promise<ConnectionOutput> {
-  const context = buildConnectionContext(family)
-  const culturalCtx = getCulturalContext(new Date())
-  const culturalBlock = formatCulturalContextBlock(culturalCtx)
+const effortFor = (days: number | null): ConnectionMicroAction['type'] => ((days ?? 30) >= 14 ? 'medium' : 'quick')
 
-  console.log('[connection-agent] Starting — family:', family.name, '| members:', family.members.length)
-  console.log('[connection-agent] Context length (chars):', context.length)
+function templateSuggestion(a: FamilyMember, b: FamilyMember, evening: Date | null): string {
+  return evening
+    ? `Both calendars are clear after 17:00 on ${format(evening, 'EEEE')}. Plan 20 minutes together, such as a walk, a call or tea.`
+    : `Find 20 minutes this week for ${a.name} and ${b.name}: a call or a voice note is enough.`
+}
 
-  const startMs = Date.now()
+const SuggestionSchema = z.object({
+  suggestions: z.array(
+    z.object({
+      pair: z.number().int().describe('The pair number being written for, exactly as numbered in the prompt'),
+      suggestion: z.string().describe('One warm, specific sentence proposing a low-effort way to spend time together'),
+      microAction: z.string().describe('A short imperative, under 14 words, for the week ahead'),
+    }),
+  ),
+})
 
-  const eidOrRamadanNote =
-    culturalCtx.socialObligationLevel === 'high'
-      ? `
-SOCIAL CALENDAR NOTE: Social obligation level is HIGH (Eid or Ramadan period active). During this time, family members naturally converge through collective rituals, shared iftar meals, and Eid visits. Reduce the severity of drift alerts accordingly — brief individual gaps are expected and healthy during this period. Do not flag normal Ramadan/Eid separation patterns as critical drift. Focus alerts only on members who are genuinely isolated from the collective gatherings (e.g., an elderly grandparent not included in Eid plans).`
-      : ''
+export async function runConnectionAgent(
+  family: Family,
+  now: Date = getToday(),
+  options: { offline?: boolean } = {},
+): Promise<AgentResult<ConnectionOutput>> {
+  const culturalCtx = getCulturalContext(now, family.members)
+  const byId = (id: string) => family.members.find((m) => m.id === id)!
 
-  const result = await safeGenerateObject({
-    model: nemotronNano,
-    mode: 'json' as const,
-    providerOptions: {
-      openai: {
-        chat_template_kwargs: { enable_thinking: false },
-      },
-    },
-    schema: ConnectionSchema,
-    timeoutMs: 60_000,
-    fallbackTimeoutMs: 90_000,
-    system: `You are Bayt's Connection Agent. Your mission is to protect and strengthen emotional bonds within the ${family.name} family.
+  const selected: PairDrift[] = selectDrift(computePairDrift(family, now), { socialLevel: culturalCtx.socialObligationLevel })
 
-${culturalBlock}
-${eidOrRamadanNote}
+  const evenings = new Map<string, Date | null>(
+    selected.map((p) => [p.key, nextFreeEvening(byId(p.aId), byId(p.bId), now)]),
+  )
 
-You detect relationship drift — when family members are going too long without meaningful contact — and propose gentle micro-actions to repair connections before they erode.
+  // ── Model: wording only, constrained to the pairs we computed ────────────────────
+  let wording = new Map<number, { suggestion: string; microAction: string }>()
+  let error: string | undefined
+  let isFallback = false
 
-ANALYSIS APPROACH:
-- Review each member's calendar events to infer time spent together vs. apart.
-- Look for gaps: members with no shared events in 5–14+ days, or solo-heavy schedules.
-- Consider life context: exam periods, work travel, health limitations, age-appropriate independence.
-- No chat logs are available — reason from calendar data and family roles.
-- Prioritize parent-child bonds, grandparent isolation, and sibling dynamics.
+  if (selected.length > 0 && !options.offline) {
+    // Health overrides are irrelevant to who spends time with whom, so they are left out of this prompt.
+    const culturalBlock = formatCulturalContextBlock({ ...culturalCtx, healthAlertOverrides: [] })
+    const softening =
+      culturalCtx.socialObligationLevel === 'high'
+        ? 'It is Ramadan or Eid: gaps are expected. Keep suggestions gentle and tied to shared meals and gatherings.'
+        : ''
 
-OUTPUT REQUIREMENTS:
+    const result = await safeGenerateObject({
+      model: geminiFlash,
+      schema: SuggestionSchema,
+      timeoutMs: 30_000,
+      fallbackTimeoutMs: 45_000,
+      system: `You are Bayt's Connection Agent. You suggest small, kind ways for family members to spend time together.
+You only know what is on the shared calendar. NEVER state or imply anything about conversations, feelings, arguments or what a person said; talk only about time together.
+Fit every suggestion to the real ages of the two people (a teenager will not want childish activities; a grandparent may prefer sitting activities). Use only facts given; do not invent plans, hobbies or events. ${softening}
 
-driftAlerts (1–4):
-- Flag genuine relationship risks, not routine independence.
-- severity: 'critical' (10+ days or isolation risk), 'moderate' (5–14 days, meaningful gap), 'minor' (< 7 days, gentle nudge).
-- reason: cite specific evidence from the calendar data.
-- suggestion: concrete, timed, low-friction — specific day of week, short duration.
+${culturalBlock}`,
+      prompt: `For each numbered pair, write one suggestion and one micro-action. Answer with the pair's number.\n\n${selected
+        .map((p, i) => {
+          const evening = evenings.get(p.key)
+          return `${i + 1}. ${byId(p.aId).name} (${byId(p.aId).role}, age ${byId(p.aId).age}) and ${byId(p.bId).name} (${byId(p.bId).role}, age ${byId(p.bId).age}). ${p.evidence} ${
+            evening ? `Both are free after 17:00 on ${format(evening, 'EEEE d MMM')}.` : 'No shared free evening this week.'
+          }`
+        })
+        .join('\n')}`,
+    })
 
-microActions (3–6):
-- One action per drift alert, plus 1–2 proactive family connection moments.
-- day: day of week (Mon/Tue/Wed/Thu/Fri/Sat/Sun).
-- type: 'quick' (< 15 min — message, voice note, shared breakfast), 'medium' (30–60 min), 'invest' (2+ hours, outing or ritual).
-- membersInvolved: use member names (not IDs).
-
-memoriesVault (3–5):
-- Surface emotionally meaningful family moments as first-person quotes from family members.
-- Each quote: 1–2 vivid, specific, personal sentences.
-- attribution: the family member's name.
-- role: their family role (Father, Mother, Daughter, Son, Grandmother, Grandfather).
-- date: YYYY-MM-DD format, today or recent past.
-- Write quotes that reflect actual ages — children's quotes should sound like children.
-
-syncScore (0–100):
-- 80–100: strong bonds, frequent meaningful contact.
-- 60–79: mild strain, some gaps.
-- 40–59: moderate concern, multiple drift risks.
-- 0–39: critical disconnection or isolation.
-- Score based on the number and severity of drift alerts.`,
-    prompt: context,
-  })
-
-  const elapsedMs = Date.now() - startMs
-  console.log(`[connection-agent] returned in ${elapsedMs}ms | ok=${result.ok}`)
-
-  if (!result.ok) {
-    console.error('[connection-agent] FAILED:', result.error)
-    throw new Error(`Connection agent failed: ${result.error}`)
+    if (result.ok) {
+      wording = new Map(
+        result.data.suggestions
+          .filter((s) => s.pair >= 1 && s.pair <= selected.length)
+          .map((s) => [s.pair, { suggestion: s.suggestion.trim(), microAction: s.microAction.trim() }]),
+      )
+    } else {
+      // Template wording is complete and honest; the evidence is deterministic either way.
+      isFallback = true
+      error = `Wording: ${result.error}`
+    }
   }
 
-  const output = result.data as ConnectionOutput
-
-  console.log('[connection-agent] Drift alerts:', output.driftAlerts.length)
-  output.driftAlerts.forEach((d) => {
-    console.log(`[connection-agent]   ${d.memberA}↔${d.memberB}: ${d.daysSinceContact}d [${d.severity}]`)
+  const driftAlerts: ConnectionDriftAlert[] = selected.map((p, i) => {
+    const a = byId(p.aId)
+    const b = byId(p.bId)
+    return {
+      memberA: a.name,
+      memberB: b.name,
+      memberAId: a.id,
+      memberBId: b.id,
+      daysSinceContact: p.daysSinceShared ?? DRIFT_LOOKBACK_DAYS,
+      severity: severityFor(p.daysSinceShared),
+      reason: p.evidence,
+      suggestion: wording.get(i + 1)?.suggestion ?? templateSuggestion(a, b, evenings.get(p.key) ?? null),
+      sources: p.sources,
+    }
   })
-  console.log('[connection-agent] Micro-actions:', output.microActions.length)
-  console.log('[connection-agent] Memories vault:', output.memoriesVault.length)
-  console.log('[connection-agent] Sync score:', output.syncScore)
 
-  return output
+  const microActions: ConnectionMicroAction[] = selected.map((p, i) => {
+    const a = byId(p.aId)
+    const b = byId(p.bId)
+    const when = evenings.get(p.key) ?? new Date(now.getTime() + 2 * 86_400_000)
+    return {
+      day: format(when, 'EEE'),
+      date: when.toISOString(),
+      type: effortFor(p.daysSinceShared),
+      description: wording.get(i + 1)?.microAction ?? `Spend 20 minutes together: ${a.name} and ${b.name}`,
+      membersInvolved: [a.name, b.name],
+      memberIds: [a.id, b.id],
+    }
+  })
+
+  const memories = await getMemories(family.id)
+  const memoriesVault: MemoryVaultEntry[] = memories.map((m) => ({
+    id: m.id,
+    quote: m.quote,
+    attribution: family.members.find((x) => x.id === m.attribution)?.name ?? m.attribution,
+    role: m.role,
+    date: m.capturedAt,
+    source: m.source,
+  }))
+
+  return { output: { driftAlerts, microActions, memoriesVault }, isFallback, error }
 }

@@ -1,13 +1,14 @@
 import {
-  RAMADAN_2026,
+  RAMADAN_PERIODS,
+  EID_HOLIDAYS,
   GULF_DUST_SEASON,
   GULF_SUMMER_HEAT,
   UAE_SCHOOL_TERMS,
   GULF_NATIONAL_DAY,
-  EID_AL_FITR_2026,
-  EID_AL_ADHA_2026,
+  CULTURAL_CALENDAR_COVERS_UNTIL,
   type AnnualSeason,
 } from '@/lib/data/cultural-calendar'
+import type { FamilyMember } from '@/types/family'
 
 export type ActiveSeason =
   | 'ramadan'
@@ -32,7 +33,24 @@ export interface CulturalContext {
   mealPlanningMode: MealPlanningMode
   healthAlertOverrides: string[]
   socialObligationLevel: SocialObligationLevel
+  /** Given names of members with a respiratory condition, read from member data (never hard-coded). */
+  respiratoryMemberNames: string[]
+  /** False when the date is past the dated table, so Ramadan/Eid/term data is missing. */
+  calendarCovered: boolean
 }
+
+type MemberLike = Pick<FamilyMember, 'name' | 'healthProfile'>
+
+const RESPIRATORY = /asthma|copd|respiratory|bronch/i
+
+export function respiratoryMembers(members: MemberLike[] = []): string[] {
+  return members
+    .filter((m) => m.healthProfile?.conditions.some((c) => RESPIRATORY.test(c)))
+    .map((m) => m.name)
+}
+
+const joinNames = (names: string[]) =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 
 function msTodays(ms: number): number {
   return Math.round(ms / 86400000)
@@ -50,47 +68,50 @@ function isInAnnualSeason(date: Date, season: AnnualSeason): boolean {
   return dateNum >= startNum && dateNum <= endNum
 }
 
-export function getCulturalContext(date: Date): CulturalContext {
+export function getCulturalContext(date: Date, members: MemberLike[] = []): CulturalContext {
   const activeSeasons: ActiveSeason[] = []
   const upcomingEvents: UpcomingEvent[] = []
   const healthAlertOverrides: string[] = []
+  const respiratoryMemberNames = respiratoryMembers(members)
 
   // ── Ramadan ──────────────────────────────────────────────────────────────────
-  const isRamadan = date >= RAMADAN_2026.start && date <= RAMADAN_2026.end
-  const isPreRamadanAlert = date >= RAMADAN_2026.preRamadanAlert && date < RAMADAN_2026.start
-  const daysToRamadan = msTodays(RAMADAN_2026.start.getTime() - date.getTime())
+  const currentRamadan = RAMADAN_PERIODS.find((r) => date >= r.start && date <= r.end)
+  const isRamadan = Boolean(currentRamadan)
+  const nextRamadan = RAMADAN_PERIODS.find((r) => r.start > date)
+  const isPreRamadanAlert = Boolean(nextRamadan && date >= nextRamadan.preRamadanAlert)
 
   if (isRamadan) {
     activeSeasons.push('ramadan')
-  } else if (isPreRamadanAlert || (daysToRamadan > 0 && daysToRamadan <= 30)) {
-    upcomingEvents.push({ name: 'Ramadan', daysUntil: daysToRamadan, impactLevel: 'high' })
+  } else if (nextRamadan) {
+    const daysToRamadan = msTodays(nextRamadan.start.getTime() - date.getTime())
+    if (daysToRamadan > 0 && daysToRamadan <= 30) {
+      upcomingEvents.push({ name: 'Ramadan', daysUntil: daysToRamadan, impactLevel: 'high' })
+    }
   }
 
-  // ── Eid al-Fitr ──────────────────────────────────────────────────────────────
-  const daysToEidFitr = msTodays(EID_AL_FITR_2026.date.getTime() - date.getTime())
-  if (daysToEidFitr >= 0 && daysToEidFitr <= 14) {
-    upcomingEvents.push({
-      name: `Eid al-Fitr (±${EID_AL_FITR_2026.uncertaintyDays}d)`,
-      daysUntil: daysToEidFitr,
-      impactLevel: 'high',
-    })
-  }
-
-  // ── Eid al-Adha ──────────────────────────────────────────────────────────────
-  const daysToEidAdha = msTodays(EID_AL_ADHA_2026.date.getTime() - date.getTime())
-  if (daysToEidAdha >= 0 && daysToEidAdha <= 14) {
-    upcomingEvents.push({
-      name: `Eid al-Adha (±${EID_AL_ADHA_2026.uncertaintyDays}d)`,
-      daysUntil: daysToEidAdha,
-      impactLevel: 'high',
-    })
+  // ── Eids (each holiday is a ±uncertainty window) ─────────────────────────────
+  let inEidWindow = false
+  let eidWithinWeek = false
+  for (const eid of EID_HOLIDAYS) {
+    const daysTo = msTodays(eid.date.getTime() - date.getTime())
+    if (daysTo >= 0 && daysTo <= 14) {
+      upcomingEvents.push({
+        name: `${eid.name} (±${eid.uncertaintyDays}d)`,
+        daysUntil: daysTo,
+        impactLevel: 'high',
+      })
+    }
+    if (daysTo >= -(eid.uncertaintyDays + 3) && daysTo <= eid.uncertaintyDays + 3) inEidWindow = true
+    if (daysTo >= 0 && daysTo <= 7) eidWithinWeek = true
   }
 
   // ── Gulf Dust Season ─────────────────────────────────────────────────────────
   if (isInAnnualSeason(date, GULF_DUST_SEASON)) {
     activeSeasons.push('dust_season')
     healthAlertOverrides.push(
-      'Dust season: Khalid asthma risk elevated. Avoid outdoor PE. Keep reliever inhaler accessible at all times.'
+      respiratoryMemberNames.length > 0
+        ? `Dust season: respiratory sensitivity for ${joinNames(respiratoryMemberNames)}. Avoid outdoor PE and keep reliever medication within reach.`
+        : 'Dust season: limit outdoor activity on high-dust days for anyone with respiratory sensitivity.'
     )
   }
 
@@ -148,20 +169,9 @@ export function getCulturalContext(date: Date): CulturalContext {
 
   // ── Social obligation level ──────────────────────────────────────────────────
   let socialObligationLevel: SocialObligationLevel = 'low'
-  const inEidFitrWindow =
-    daysToEidFitr >= -(EID_AL_FITR_2026.uncertaintyDays + 3) &&
-    daysToEidFitr <= EID_AL_FITR_2026.uncertaintyDays + 3
-  const inEidAdhaWindow =
-    daysToEidAdha >= -(EID_AL_ADHA_2026.uncertaintyDays + 3) &&
-    daysToEidAdha <= EID_AL_ADHA_2026.uncertaintyDays + 3
-
-  if (isRamadan || inEidFitrWindow || inEidAdhaWindow) {
+  if (isRamadan || inEidWindow) {
     socialObligationLevel = 'high'
-  } else if (
-    (daysToEidFitr >= 0 && daysToEidFitr <= 7) ||
-    (daysToEidAdha >= 0 && daysToEidAdha <= 7) ||
-    (daysToNationalDay >= 0 && daysToNationalDay <= 7)
-  ) {
+  } else if (eidWithinWeek || (daysToNationalDay >= 0 && daysToNationalDay <= 7)) {
     socialObligationLevel = 'medium'
   }
 
@@ -173,6 +183,8 @@ export function getCulturalContext(date: Date): CulturalContext {
     mealPlanningMode,
     healthAlertOverrides,
     socialObligationLevel,
+    respiratoryMemberNames,
+    calendarCovered: date <= CULTURAL_CALENDAR_COVERS_UNTIL,
   }
 }
 
@@ -223,7 +235,11 @@ export function getCulturalModeTooltip(ctx: CulturalContext): string {
     )
   }
   if (ctx.activeSeasons.includes('dust_season')) {
-    parts.push('Dust season active — asthma risk flags elevated for Khalid.')
+    parts.push(
+      ctx.respiratoryMemberNames.length > 0
+        ? `Dust season active — respiratory precautions raised for ${joinNames(ctx.respiratoryMemberNames)}.`
+        : 'Dust season active — outdoor precautions advised.'
+    )
   }
   if (ctx.activeSeasons.includes('summer_heat')) {
     parts.push('Summer heat advisory — outdoor activity recommendations restricted.')

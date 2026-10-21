@@ -7,23 +7,29 @@ import type {
   HealthOutput,
   ConnectionOutput,
   CaregiverOutput,
+  AgentResponseMeta,
 } from '@/types';
-import { mockConnectionOutput } from '@/lib/data/mock-connection';
-import { mockCaregiverOutput } from '@/lib/data/mock-caregiver';
-
 type AgentOutputMap = {
   operations?: OperationsOutput;
   health?: HealthOutput;
-  connection: ConnectionOutput;
-  caregiver: CaregiverOutput;
+  connection?: ConnectionOutput;
+  caregiver?: CaregiverOutput;
 };
+
+/** Truthful per-agent metadata: when the result was produced and why it is a fallback, if it is. */
+export interface AgentMeta {
+  generatedAt?: string;
+  error?: string;
+}
 
 interface AgentState {
   agentStatuses: Record<AgentName, AgentStatus>;
   agentOutputs: AgentOutputMap;
+  agentMeta: Partial<Record<AgentName, AgentMeta>>;
   setStatus: (agent: AgentName, status: AgentStatus) => void;
   setOutput: (agent: AgentName, output: AgentOutputMap[AgentName]) => void;
-  runAgent: (agent: AgentName) => Promise<void>;
+  /** Without `force` the server returns today's stored run, so opening a page never burns model quota. */
+  runAgent: (agent: AgentName, options?: { force?: boolean }) => Promise<void>;
 }
 
 const AGENT_ROUTES: Record<AgentName, string> = {
@@ -36,17 +42,16 @@ const AGENT_ROUTES: Record<AgentName, string> = {
 export const useAgentStore = create<AgentState>()(
   devtools(
     (set, get) => ({
+      // Nothing is "live" or "preview" until an agent has actually run.
       agentStatuses: {
-        operations: 'live',
-        health: 'live',
-        connection: 'preview',
-        caregiver: 'preview',
+        operations: 'idle',
+        health: 'idle',
+        connection: 'idle',
+        caregiver: 'idle',
       },
 
-      agentOutputs: {
-        connection: mockConnectionOutput,
-        caregiver: mockCaregiverOutput,
-      },
+      agentOutputs: {},
+      agentMeta: {},
 
       setStatus: (agent, status) =>
         set(
@@ -66,14 +71,26 @@ export const useAgentStore = create<AgentState>()(
           'setOutput'
         ),
 
-      runAgent: async (agent) => {
+      runAgent: async (agent, options = {}) => {
         const { setStatus, setOutput } = get();
+        if (get().agentStatuses[agent] === 'thinking') return;
         setStatus(agent, 'thinking');
         try {
-          const res = await fetch(AGENT_ROUTES[agent], { method: 'POST' });
+          const res = await fetch(AGENT_ROUTES[agent], {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: options.force === true }),
+          });
           if (!res.ok) throw new Error(`Agent ${agent} failed: ${res.status}`);
-          const output = await res.json() as NonNullable<AgentOutputMap[AgentName]> & { _mock?: boolean };
+          const output = await res.json() as NonNullable<AgentOutputMap[AgentName]> & AgentResponseMeta;
           setOutput(agent, output);
+          set(
+            (state) => ({
+              agentMeta: { ...state.agentMeta, [agent]: { generatedAt: output._generatedAt, error: output._error } },
+            }),
+            false,
+            'setMeta'
+          );
           setStatus(agent, output._mock ? 'preview' : 'live');
         } catch (err) {
           console.error(`runAgent(${agent})`, err);
