@@ -1,5 +1,9 @@
-import { google } from '@ai-sdk/google'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
+import { cleanEnv } from '@/lib/env'
+
+// Same variable the SDK reads by default, but cleaned of pasted quotes/whitespace (see cleanEnv).
+const google = createGoogleGenerativeAI({ apiKey: cleanEnv(process.env.GOOGLE_GENERATIVE_AI_API_KEY) })
 
 export const geminiFlash = google('gemini-2.5-flash')
 export const geminiPro = google('gemini-2.5-pro')
@@ -8,7 +12,7 @@ export const NVIDIA_MODEL_ID = process.env.NVIDIA_MODEL ?? 'nvidia/nemotron-3.5-
 
 const nvidia = createOpenAI({
   baseURL: 'https://integrate.api.nvidia.com/v1',
-  apiKey: process.env.NVIDIA_API_KEY ?? '',
+  apiKey: cleanEnv(process.env.NVIDIA_API_KEY) ?? '',
   // The AI SDK drops provider options it does not know, so `chat_template_kwargs` never reached
   // NVIDIA and Nemotron "thought" for thousands of tokens before answering (measured: 4,568 of
   // 6,000 tokens spent reasoning, minutes of latency, JSON cut off mid-string). Inject the switch

@@ -4,7 +4,17 @@ import { z } from 'zod'
 // (and serve fallback data) when a key is missing. We only report precisely
 // what is missing so "PREVIEW DATA" is never a mystery.
 
-const present = (value: string | undefined) => z.string().trim().min(1).safeParse(value).success
+/**
+ * Hosting dashboards (Netlify, Vercel) keep a value exactly as pasted. `.env.local.example` shows the
+ * keys in quotes, so a pasted `"AIza..."` arrives with the quote characters and is rejected by the
+ * provider as an invalid key. Strip whitespace and one pair of surrounding quotes.
+ */
+export const cleanEnv = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim().replace(/^(["'])(.*)\1$/, '$2').trim()
+  return trimmed ? trimmed : undefined
+}
+
+const present = (value: string | undefined) => z.string().trim().min(1).safeParse(cleanEnv(value)).success
 
 export interface EnvStatus {
   hasGemini: boolean

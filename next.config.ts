@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // The seeded SQLite file is only opened at runtime, so file tracing cannot see it. Without this the
+  // serverless bundle has no database and every page that needs the family fails.
+  outputFileTracingIncludes: {
+    "/**": ["./dev.db"],
+  },
 };
 
 export default nextConfig;

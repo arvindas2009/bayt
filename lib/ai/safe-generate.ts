@@ -6,6 +6,7 @@ import {
 import type { z } from 'zod'
 import { fallbackModel, NVIDIA_MODEL_ID } from './client'
 import { logEnvStatusOnce } from '@/lib/env'
+import { capTimeouts } from './budget'
 
 export type SafeGenerateResult<T> =
   | { ok: true; data: T }
@@ -84,7 +85,8 @@ export async function safeGenerateObject<
 >(
   options: GenerateObjectOptions<SCHEMA, OUTPUT>,
 ): Promise<SafeGenerateResult<GenerateObjectResultType<SCHEMA, OUTPUT>>> {
-  const { timeoutMs = 45_000, fallbackTimeoutMs = 60_000, failover = true, ...generateObjectOptions } = options
+  const { timeoutMs: requestedTimeout = 45_000, fallbackTimeoutMs: requestedFallback = 60_000, failover = true, ...generateObjectOptions } = options
+  const { primary: timeoutMs, fallback: fallbackTimeoutMs } = capTimeouts(requestedTimeout, requestedFallback)
   const env = logEnvStatusOnce()
 
   const primarySignal = AbortSignal.timeout(timeoutMs)

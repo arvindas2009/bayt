@@ -3,6 +3,7 @@ import { geminiFlash } from '@/lib/ai/client'
 import { isPrivacyVaultEnabled } from '@/lib/ai/ollama'
 import { isFaithfulRewrite } from '@/lib/ai/guards'
 import { safeGenerateObject } from '@/lib/ai/safe-generate'
+import { REQUEST_BUDGET_MS } from '@/lib/ai/budget'
 import { buildPriorityItems } from '@/lib/briefing/rank'
 import { composeBriefing } from '@/lib/briefing/compose'
 import { getFamilyWithEverything } from '@/lib/db/queries'
@@ -78,7 +79,10 @@ export async function runOrchestrator(familyId: string, options: OrchestratorOpt
 
   let briefing = composeBriefing({ family: fresh, now, load, items, ops, health, connection, caregiver, dividend })
 
-  if (!offline) briefing = await polishWording(briefing)
+  // The wording pass is optional. On a host with a request time limit, skip it when the agents used
+  // most of the budget rather than let the whole request time out.
+  const remainingMs = REQUEST_BUDGET_MS - (Date.now() - startMs)
+  if (!offline && remainingMs > 12_000) briefing = await polishWording(briefing, remainingMs)
 
   console.log(`[orchestrator] Persisting briefing — insights: ${briefing.insights.length} | alerts: ${briefing.alerts.length} | source: ${briefing.source}`)
   await saveBriefing(familyId, briefing)
@@ -86,7 +90,7 @@ export async function runOrchestrator(familyId: string, options: OrchestratorOpt
 }
 
 /** Ask the model to rephrase, never to add. Ids and facts are checked; on any failure keep the rules version. */
-async function polishWording(briefing: BriefingData): Promise<BriefingData> {
+async function polishWording(briefing: BriefingData, remainingMs: number): Promise<BriefingData> {
   // With the Privacy Vault on, health-derived text must not be sent to a cloud model.
   const vaultOn = await isPrivacyVaultEnabled()
   const polishable = briefing.insights.filter((i) => !(i.agent === 'health' && vaultOn))
@@ -95,8 +99,8 @@ async function polishWording(briefing: BriefingData): Promise<BriefingData> {
   const result = await safeGenerateObject({
     model: geminiFlash,
     schema: PolishSchema,
-    timeoutMs: 30_000,
-    fallbackTimeoutMs: 45_000,
+    timeoutMs: Math.min(30_000, remainingMs * 0.5),
+    fallbackTimeoutMs: Math.min(45_000, remainingMs * 0.4),
     system: `You are the Briefing Composer. Rewrite a family briefing so it reads like a calm, trusted advisor, not a report.
 You may only rephrase. Do NOT add, remove or change any fact, name, number, date or time, and do not add detail, narrate or imagine scenes. Keep each insight to one or two sentences. Never use gendered pronouns: use names. The summary is exactly two sentences.`,
     prompt: `Current summary:\n${briefing.summary}\n\nInsights to rewrite:\n${polishable.map((i) => `- id ${i.id}: ${i.text}`).join('\n')}`,

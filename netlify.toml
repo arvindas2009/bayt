@@ -1,10 +1,17 @@
 [build]
-  command = "npx prisma db push --accept-data-loss && npm run seed && npm run build"
+  # Fresh database from the checked-in migrations, filled with the demo family, then the app build.
+  # The seeded dev.db is what the deployed functions copy to /tmp and read.
+  command = "npx prisma migrate deploy && npm run seed && npm run build"
   publish = ".next"
+
+[build.environment]
+  # Prisma's CLI and the seed read this at build time (the .env files are not in git).
+  DATABASE_URL = "file:./dev.db"
+  NODE_VERSION = "22"
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["dev.db", "prisma/**"]
+  included_files = ["dev.db"]
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
