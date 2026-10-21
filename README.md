@@ -1,5 +1,7 @@
 # Bayt
 
+Live: https://bayt.reilabs.cc/
+
 Bayt is a family operating system for Gulf households. It sees the invisible coordination work in a home, finds where the household is fragile, and redistributes work with the consent of the people involved.
 
 The principle behind every screen: **code decides, the model writes.** Load, ranking, conflicts, resilience and diet checks are deterministic and tested. A model only phrases what the code has already established, and its output is checked before it reaches the screen.

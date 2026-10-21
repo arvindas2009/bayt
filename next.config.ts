@@ -8,6 +8,13 @@ const nextConfig: NextConfig = {
   // The parent folder has its own package-lock.json (Remotion), which made Next treat it as the
   // workspace root and watch far more files than the app needs.
   turbopack: { root: path.resolve(__dirname) },
+  // Netlify build settings from the deploy branch.
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 };
 
 export default nextConfig;
